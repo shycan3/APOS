@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from urllib import error, request
@@ -25,6 +26,9 @@ Rules:
 - If required information or write access is missing, return a permission request.
 - Preserve existing public APIs unless the TaskSpec explicitly permits a change.
 """
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -129,7 +133,7 @@ def build_model_prompt(apos_prompt: str) -> str:
 
 
 def extract_protocol_output(output: str) -> str:
-    stripped = output.strip()
+    stripped = _strip_terminal_control_sequences(output).strip()
     if not stripped:
         return ""
 
@@ -158,7 +162,9 @@ def _extract_json(value: str) -> str:
     try:
         payload = json.loads(value)
     except json.JSONDecodeError:
-        return ""
+        payload = _recover_permission_request(value)
+        if payload is None:
+            return ""
     if payload.get("type") not in {"request_permission", "patch"}:
         return ""
     return json.dumps(payload, ensure_ascii=False)
@@ -189,6 +195,36 @@ def _extract_fenced_block(value: str) -> str:
         if lines[index].strip().startswith("```"):
             return "\n".join(lines[start:index]).strip()
     return ""
+
+
+def _strip_terminal_control_sequences(value: str) -> str:
+    return _ANSI_RE.sub("", value)
+
+
+def _recover_permission_request(value: str) -> dict[str, str] | None:
+    if "request_permission" not in value:
+        return None
+    path = _extract_json_string_field(value, "path")
+    if not path:
+        return None
+    return {
+        "type": "request_permission",
+        "path": path,
+        "permission": _extract_json_string_field(value, "permission") or "read",
+        "reason": _extract_json_string_field(value, "reason") or "",
+    }
+
+
+def _extract_json_string_field(value: str, field: str) -> str:
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*"(?P<value>.*?)"\s*(?:,|\}})', value, re.DOTALL)
+    if not match:
+        return ""
+    raw = match.group("value")
+    try:
+        decoded = json.loads(f'"{raw}"')
+    except json.JSONDecodeError:
+        decoded = raw.replace("\r", " ").replace("\n", " ")
+    return str(decoded).strip()
 
 
 if __name__ == "__main__":

@@ -45,6 +45,24 @@ diff --git a/app.py b/app.py
 
         self.assertEqual(json.loads(extract_protocol_output(json.dumps(request))), request)
 
+    def test_recovers_fenced_permission_request_with_terminal_controls(self):
+        output = """```json
+{
+  "type": "request_permission",
+  "path": "sandbox/text_app/slug.py",
+  "permission": "write",
+  "reason": "Need write access after a failed patch.\x1b[3D\x1b[K
+Please approve."
+}
+```"""
+
+        extracted = json.loads(extract_protocol_output(output))
+
+        self.assertEqual(extracted["type"], "request_permission")
+        self.assertEqual(extracted["path"], "sandbox/text_app/slug.py")
+        self.assertEqual(extracted["permission"], "write")
+        self.assertIn("Need write access", extracted["reason"])
+
     def test_model_prompt_contains_protocol(self):
         prompt = build_model_prompt('{"protocol":"APOS_LOCAL_CODER_PATCH_V1"}')
 
