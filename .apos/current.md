@@ -15,5 +15,7 @@
 - Both approvals produce `PROMOTABLE`; APOS cannot merge, tag, deploy, or promote the candidate.
 - The evolution lifecycle has been exercised end to end in temporary Git repositories, including candidate development and rejection of modified control files.
 - The control benchmark contains greeting, slug normalization, and active todo filtering tasks and requires 3/3 PASS with average quality score at least 70.0.
+- Final APOS 1.1 baseline result: `.apos/benchmarks/apos-evolution-baseline-1-1/20260826T184408Z-b8ae3d4f/result.json` (`PASS`, 3/3 tasks, average quality score 90.0).
+- The final baseline result branches independently replayed 3/3 pinned verification commands successfully.
 - Ollama `qwen2.5-coder:7b` remains the configured Local Coder through the HTTP-first adapter.
 - Cloud Controller planning is not implemented in 1.1.

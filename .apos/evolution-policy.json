@@ -8,6 +8,10 @@
       "passed_tasks": 3,
       "total_tasks": 3,
       "minimum_quality_score": 70.0,
+      "observed_quality_score": 90.0,
+      "result_id": "20260826T184408Z-b8ae3d4f",
+      "result_path": ".apos/benchmarks/apos-evolution-baseline-1-1/20260826T184408Z-b8ae3d4f/result.json",
+      "trusted_replay": "PASS",
       "source_release": "v1.1.0"
     }
   },

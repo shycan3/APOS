@@ -30,11 +30,10 @@ attestations; release authority remains with the user and external Git actions.
 Release: v1.1.0
 Suite: apos-evolution-baseline-1.1
 Requirement: PASS, 3/3 tasks, average quality score >= 70.0
+Observed: PASS, 3/3 tasks, average quality score 90.0, trusted replay PASS
+Result: .apos/benchmarks/apos-evolution-baseline-1-1/20260826T184408Z-b8ae3d4f/result.json
 Runtime: APOS 1.1.0 with qwen2.5-coder:7b through Ollama HTTP
 ```
-
-The final captured result path is recorded in `.apos/current.md` after release
-verification.
 
 ## Deferred
 

@@ -28,6 +28,9 @@ The tracked policy is `.apos/evolution-policy.json`. It pins:
 - required `codex` and `human` reviews
 - disabled automatic promotion
 
+The release capture passed 3/3 tasks with average quality score 90.0, and all
+three result branches passed the independent trusted replay.
+
 Every candidate records the policy SHA-256, baseline commit, parent commit,
 target version, proposal snapshot, branch, and workspace path at creation time.
 

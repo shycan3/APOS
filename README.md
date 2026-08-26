@@ -262,3 +262,10 @@ Required threshold:
 ```text
 PASS, 3/3 tasks, average quality score >= 70.0
 ```
+
+Captured APOS 1.1 result:
+
+```text
+.apos/benchmarks/apos-evolution-baseline-1-1/20260826T184408Z-b8ae3d4f/result.json
+PASS, 3/3 tasks, average quality score 90.0, trusted replay PASS
+```
