@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 
-from apos.benchmark import BenchmarkError, BenchmarkSuite, validate_benchmark_suite
+from apos.benchmark import BenchmarkError, BenchmarkRunOptions, BenchmarkSuite, run_benchmark_suite, validate_benchmark_suite
 
 
 class BenchmarkSuiteTests(unittest.TestCase):
@@ -79,6 +79,85 @@ class BenchmarkSuiteTests(unittest.TestCase):
 
             json_output = self._run(root, [sys.executable, "-m", "apos", "benchmark", "show", "benchmarks/suite.json", "--json"])
             self.assertEqual(json.loads(json_output.stdout)["suite_id"], "suite-1")
+
+    def test_runs_benchmark_suite_and_writes_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+            (root / "tasks").mkdir()
+            (root / "benchmarks").mkdir()
+            (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+            (root / "app.py").write_text("def greet(name):\n    return name\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                "\n".join(
+                    [
+                        "import unittest",
+                        "from app import greet",
+                        "",
+                        "",
+                        "class GreetingTests(unittest.TestCase):",
+                        "    def test_greet(self):",
+                        "        self.assertEqual(greet('APOS'), 'Hello, APOS!')",
+                        "",
+                        "",
+                        "if __name__ == '__main__':",
+                        "    unittest.main()",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self._write_json(
+                root / "tasks" / "task-001.json",
+                {
+                    "task_id": "TASK-001",
+                    "title": "Greeting",
+                    "goal": "Make greet return a friendly message.",
+                    "allowed_files": ["app.py"],
+                    "test_commands": [f"{sys.executable} -m unittest test_app.py"],
+                },
+            )
+            self._write_json(
+                root / "benchmarks" / "suite.json",
+                {
+                    "suite_id": "suite-1",
+                    "title": "Suite",
+                    "tasks": [{"task_id": "TASK-001", "path": "tasks/task-001.json"}],
+                },
+            )
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            with tempfile.TemporaryDirectory() as coder_tmp:
+                coder = Path(coder_tmp) / "fake_coder.py"
+                coder.write_text(
+                    """
+import sys
+sys.stdin.read()
+print('''diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def greet(name):
+-    return name
++    return f"Hello, {name}!"
+''', end="")
+""".lstrip(),
+                    encoding="utf-8",
+                )
+
+                result = run_benchmark_suite(
+                    root,
+                    root / "benchmarks" / "suite.json",
+                    BenchmarkRunOptions(coder_command=f"{sys.executable} {coder}", command_timeout_seconds=30),
+                )
+
+                self.assertEqual(result["status"], "PASS", result)
+                self.assertEqual(result["summary"]["passed_tasks"], 1)
+                self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
+                self.assertTrue((root / str(result["result_path"])).exists())
 
     @staticmethod
     def _write_json(path: Path, data: object) -> None:

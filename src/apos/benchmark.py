@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
+from .config import apos_dir
+from .git import GitClient
+from .kernel import Kernel, RunOptions
 from .models import SpecError, TaskSpec
 from .pathing import project_path
+from .report import generate_quality_report
 
 
 class BenchmarkError(ValueError):
     """Raised when a benchmark suite is invalid."""
+
+
+def _slug(value: str) -> str:
+    slug = "".join(character.lower() if character.isalnum() else "-" for character in value).strip("-")
+    return "-".join(part for part in slug.split("-") if part) or "benchmark"
 
 
 @dataclass(frozen=True)
@@ -134,6 +146,109 @@ def validate_benchmark_suite(root: Path, suite_path: Path) -> BenchmarkSuite:
         if spec.task_id != task.task_id:
             raise BenchmarkError(f"task_id mismatch for {task.path}: suite has {task.task_id}, TaskSpec has {spec.task_id}")
     return suite
+
+
+@dataclass(frozen=True)
+class BenchmarkRunOptions:
+    coder_command: str | None = None
+    max_attempts: int | None = None
+    no_commit: bool = False
+    allow_dirty: bool = False
+    command_timeout_seconds: int | None = None
+    keep_going: bool = False
+
+
+def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptions) -> dict[str, object]:
+    root = GitClient(root).ensure_repo()
+    suite = validate_benchmark_suite(root, suite_path)
+    started_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    result_id = f"{started_at}-{uuid4().hex[:8]}"
+
+    tasks: list[dict[str, object]] = []
+    for task_ref in suite.tasks:
+        spec = TaskSpec.load(project_path(root, task_ref.path))
+        started = perf_counter()
+        summary = Kernel(root).run_task(
+            spec,
+            RunOptions(
+                coder_command=options.coder_command,
+                max_attempts=options.max_attempts,
+                no_commit=options.no_commit,
+                allow_dirty=options.allow_dirty,
+                command_timeout_seconds=options.command_timeout_seconds,
+            ),
+        )
+        duration_seconds = round(perf_counter() - started, 3)
+        report = generate_quality_report(root, summary.run_log) if summary.run_log else None
+        tasks.append(
+            {
+                "task": task_ref.to_dict(),
+                "status": summary.status,
+                "duration_seconds": duration_seconds,
+                "run_log": summary.run_log,
+                "summary": summary.to_dict(),
+                "report": report,
+            }
+        )
+        if summary.status != "PASS" and not options.keep_going:
+            break
+
+    result = {
+        "suite": suite.to_dict(),
+        "started_at": started_at,
+        "result_id": result_id,
+        "status": _benchmark_status(tasks, len(suite.tasks)),
+        "tasks": tasks,
+        "summary": _benchmark_summary(tasks, len(suite.tasks)),
+    }
+    result_path = _benchmark_result_path(root, suite.suite_id, result_id)
+    result["result_path"] = result_path.relative_to(root).as_posix()
+    GitClient(root).exclude_path(".apos/benchmarks/")
+    _write_json(result_path, result)
+    return result
+
+
+def _benchmark_result_path(root: Path, suite_id: str, result_id: str) -> Path:
+    directory = apos_dir(root) / "benchmarks" / _slug(suite_id) / result_id
+    directory.mkdir(parents=True, exist_ok=False)
+    return directory / "result.json"
+
+
+def _benchmark_status(tasks: list[dict[str, object]], total_tasks: int) -> str:
+    if len(tasks) < total_tasks:
+        return "FAILED"
+    if all(task.get("status") == "PASS" for task in tasks):
+        return "PASS"
+    return "FAILED"
+
+
+def _benchmark_summary(tasks: list[dict[str, object]], total_tasks: int) -> dict[str, object]:
+    completed = len(tasks)
+    passed = sum(1 for task in tasks if task.get("status") == "PASS")
+    failed = completed - passed
+    scores: list[int] = []
+    for task in tasks:
+        report = task.get("report")
+        if not isinstance(report, dict):
+            continue
+        quality = report.get("quality")
+        if not isinstance(quality, dict):
+            continue
+        score = quality.get("score")
+        if isinstance(score, int):
+            scores.append(score)
+    average_score = round(sum(scores) / len(scores), 2) if scores else None
+    return {
+        "total_tasks": total_tasks,
+        "completed_tasks": completed,
+        "passed_tasks": passed,
+        "failed_tasks": failed,
+        "average_quality_score": average_score,
+    }
+
+
+def _write_json(path: Path, data: object) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _required_string(data: dict[str, Any], key: str) -> str:

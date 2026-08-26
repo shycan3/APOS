@@ -19,7 +19,7 @@ APOS 0.1 focuses on one reliable task loop:
 - write inspectable run logs under `.apos/runs/`
 - list and inspect run logs with `apos runs list` and `apos runs show`
 - generate compact quality reports with `apos report`
-- validate and inspect benchmark suites with `apos benchmark`
+- validate, inspect, and run benchmark suites with `apos benchmark`
 
 ## Rules
 

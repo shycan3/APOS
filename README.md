@@ -93,10 +93,13 @@ test counts, rollback counts, commit information, and a deterministic score.
 ```bash
 apos benchmark validate examples/benchmarks/fast-track-suite.json
 apos benchmark show examples/benchmarks/fast-track-suite.json
+apos benchmark run examples/benchmarks/fast-track-suite.json
 ```
 
 A benchmark suite groups TaskSpec files with comparison metadata such as
 category, difficulty, weight, tags, and metrics.
+Benchmark run results are written under `.apos/benchmarks/<suite-id>/<run-id>/`
+and include each task summary plus its quality report.
 
 ## TaskSpec shape
 

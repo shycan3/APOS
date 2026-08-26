@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 from . import __version__
-from .benchmark import BenchmarkError, validate_benchmark_suite
+from .benchmark import BenchmarkError, BenchmarkRunOptions, run_benchmark_suite, validate_benchmark_suite
 from .config import ensure_project_memory, load_config, save_config
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
@@ -96,6 +96,17 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_show_parser.add_argument("suite", type=Path)
     benchmark_show_parser.add_argument("--json", action="store_true", help="print machine-readable suite metadata")
     benchmark_show_parser.set_defaults(handler=cmd_benchmark_show)
+
+    benchmark_run_parser = benchmark_subcommands.add_parser("run", help="run every TaskSpec in a benchmark suite")
+    benchmark_run_parser.add_argument("suite", type=Path)
+    benchmark_run_parser.add_argument("--coder-command", help="override configured Local Coder command")
+    benchmark_run_parser.add_argument("--max-attempts", type=int, help="override retry budget for each task")
+    benchmark_run_parser.add_argument("--timeout", type=int, help="command timeout in seconds")
+    benchmark_run_parser.add_argument("--no-commit", action="store_true", help="leave successful task changes uncommitted")
+    benchmark_run_parser.add_argument("--allow-dirty", action="store_true", help="allow starting tasks from a dirty worktree")
+    benchmark_run_parser.add_argument("--keep-going", action="store_true", help="continue after a failed benchmark task")
+    benchmark_run_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark result")
+    benchmark_run_parser.set_defaults(handler=cmd_benchmark_run)
 
     return parser
 
@@ -272,6 +283,27 @@ def cmd_benchmark_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark_run(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = run_benchmark_suite(
+        root,
+        args.suite,
+        BenchmarkRunOptions(
+            coder_command=args.coder_command,
+            max_attempts=args.max_attempts,
+            no_commit=args.no_commit,
+            allow_dirty=args.allow_dirty,
+            command_timeout_seconds=args.timeout,
+            keep_going=args.keep_going,
+        ),
+    )
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        _print_benchmark_result(result)
+    return 0 if result.get("status") == "PASS" else 2
+
+
 def _print_summary(summary) -> None:
     print(f"Task: {summary.task_id}")
     print(f"Status: {summary.status}")
@@ -372,6 +404,29 @@ def _print_benchmark_suite(suite: dict[str, object]) -> None:
         )
     if metrics:
         print(f"Metrics: {', '.join(str(metric) for metric in metrics)}")
+
+
+def _print_benchmark_result(result: dict[str, object]) -> None:
+    suite = result.get("suite") if isinstance(result.get("suite"), dict) else {}
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    tasks = result.get("tasks") if isinstance(result.get("tasks"), list) else []
+    print(f"Benchmark result: {result.get('result_id')}")
+    print(f"Suite: {suite.get('suite_id')}")
+    print(f"Status: {result.get('status')}")
+    print(f"Tasks: {summary.get('passed_tasks')}/{summary.get('total_tasks')} passed")
+    print(f"Average score: {summary.get('average_quality_score')}")
+    print(f"Result file: {result.get('result_path')}")
+    for item in tasks:
+        if not isinstance(item, dict):
+            continue
+        task = item.get("task") if isinstance(item.get("task"), dict) else {}
+        report = item.get("report") if isinstance(item.get("report"), dict) else {}
+        quality = report.get("quality") if isinstance(report.get("quality"), dict) else {}
+        print(
+            f"  {task.get('task_id')}  {item.get('status')}  "
+            f"score={quality.get('score')}  duration={item.get('duration_seconds')}s  "
+            f"log={item.get('run_log')}"
+        )
 
 
 if __name__ == "__main__":

@@ -5,5 +5,6 @@
 - Done: add CLI commands to list and inspect recent APOS runs.
 - Done: generate a compact quality report from a run log.
 - Done: create benchmark task suite metadata.
-- Next: run a benchmark suite and collect per-task reports.
+- Done: run a benchmark suite and collect per-task reports.
+- Next: add TaskSpec draft/generation support.
 - Later: add Cloud Controller TaskSpec generation.
