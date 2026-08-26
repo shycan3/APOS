@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
 
 from .coder import CommandPatchCoder, build_coder_prompt, summarize_failures
 from .config import configured_coder_command, load_config
 from .executor import run_commands
 from .git import GitClient, GitError
-from .models import AttemptResult, PermissionSpec, RunSummary, TaskSpec
+from .models import AttemptResult, ContextRequest, PermissionSpec, RunSummary, TaskSpec
+from .pathing import PathPolicyError, normalize_project_path
 from .permissions import PermissionError, PermissionManager
 from .runlog import RunRecorder
 
@@ -23,6 +25,9 @@ class RunOptions:
     no_commit: bool = False
     allow_dirty: bool = False
     command_timeout_seconds: int | None = None
+    approved_read: tuple[str, ...] = ()
+    approved_write: tuple[str, ...] = ()
+    denied_permissions: tuple[str, ...] = ()
 
 
 class Kernel:
@@ -78,6 +83,20 @@ class Kernel:
                 message = "Local Coder requested permission"
                 if request is not None:
                     message = f"{message}: {request.permission} {request.path} ({request.reason})"
+                    decision = _permission_decision(request, options)
+                    if decision == "deny":
+                        attempt = AttemptResult(attempt_number, "PERMISSION_DENIED", f"{message}; denied by APOS run options")
+                        attempts.append(attempt)
+                        recorder.record_attempt(attempt)
+                        return self._finish(recorder, RunSummary("PERMISSION_DENIED", spec.task_id, branch, attempts))
+                    if decision in ("read", "write"):
+                        spec = _grant_permission(spec, request.path, decision)
+                        permissions = PermissionManager(PermissionSpec.from_task(spec))
+                        previous_error = f"{message}; approved as {decision} for the next attempt"
+                        attempt = AttemptResult(attempt_number, "PERMISSION_GRANTED", previous_error)
+                        attempts.append(attempt)
+                        recorder.record_attempt(attempt)
+                        continue
                 attempt = AttemptResult(attempt_number, "NEEDS_PERMISSION", message)
                 attempts.append(attempt)
                 recorder.record_attempt(attempt)
@@ -170,3 +189,39 @@ class Kernel:
             return f"{message}\n{rollback_message}"
         recorder.record_rollback(attempt, "PASS", "failed attempt patch was rolled back")
         return message
+
+
+def _permission_decision(request: ContextRequest, options: RunOptions) -> str | None:
+    try:
+        requested_path = normalize_project_path(request.path)
+        denied = {normalize_project_path(path) for path in options.denied_permissions}
+        approved_read = {normalize_project_path(path) for path in options.approved_read}
+        approved_write = {normalize_project_path(path) for path in options.approved_write}
+    except PathPolicyError as exc:
+        raise KernelError(str(exc)) from exc
+
+    if requested_path in denied:
+        return "deny"
+    requested_permission = request.permission.lower()
+    if requested_path in approved_write:
+        return "write"
+    if requested_permission == "read" and requested_path in approved_read:
+        return "read"
+    return None
+
+
+def _grant_permission(spec: TaskSpec, path: str, decision: str) -> TaskSpec:
+    normalized_path = normalize_project_path(path)
+    if decision == "write":
+        allowed_files = _append_unique(spec.allowed_files, normalized_path)
+        read_only_files = [item for item in spec.read_only_files if normalize_project_path(item) != normalized_path]
+        return replace(spec, allowed_files=allowed_files, read_only_files=read_only_files)
+    return replace(spec, read_only_files=_append_unique(spec.read_only_files, normalized_path))
+
+
+def _append_unique(values: list[str], value: str) -> list[str]:
+    normalized = normalize_project_path(value)
+    seen = {normalize_project_path(item) for item in values}
+    if normalized in seen:
+        return list(values)
+    return [*values, normalized]

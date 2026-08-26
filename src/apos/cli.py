@@ -99,6 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--timeout", type=int, help="command timeout in seconds")
     run_parser.add_argument("--no-commit", action="store_true", help="leave successful changes uncommitted")
     run_parser.add_argument("--allow-dirty", action="store_true", help="allow starting from a dirty worktree")
+    run_parser.add_argument("--approve-read", action="append", default=[], help="pre-approve a requested read path; repeat for multiple paths")
+    run_parser.add_argument("--approve-write", action="append", default=[], help="pre-approve a requested write path; repeat for multiple paths")
+    run_parser.add_argument("--deny-permission", action="append", default=[], help="pre-deny a requested path; repeat for multiple paths")
     run_parser.add_argument("--json", action="store_true", help="print machine-readable run summary")
     run_parser.set_defaults(handler=cmd_run)
 
@@ -140,6 +143,9 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_run_parser.add_argument("--no-commit", action="store_true", help="leave successful task changes uncommitted")
     benchmark_run_parser.add_argument("--allow-dirty", action="store_true", help="allow starting tasks from a dirty worktree")
     benchmark_run_parser.add_argument("--keep-going", action="store_true", help="continue after a failed benchmark task")
+    benchmark_run_parser.add_argument("--approve-read", action="append", default=[], help="pre-approve a requested read path for every task")
+    benchmark_run_parser.add_argument("--approve-write", action="append", default=[], help="pre-approve a requested write path for every task")
+    benchmark_run_parser.add_argument("--deny-permission", action="append", default=[], help="pre-deny a requested path for every task")
     benchmark_run_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark result")
     benchmark_run_parser.set_defaults(handler=cmd_benchmark_run)
 
@@ -317,6 +323,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             no_commit=args.no_commit,
             allow_dirty=args.allow_dirty,
             command_timeout_seconds=args.timeout,
+            approved_read=tuple(args.approve_read),
+            approved_write=tuple(args.approve_write),
+            denied_permissions=tuple(args.deny_permission),
         ),
     )
     if args.json:
@@ -405,6 +414,9 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
             allow_dirty=args.allow_dirty,
             command_timeout_seconds=args.timeout,
             keep_going=args.keep_going,
+            approved_read=tuple(args.approve_read),
+            approved_write=tuple(args.approve_write),
+            denied_permissions=tuple(args.deny_permission),
         ),
     )
     if args.json:

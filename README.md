@@ -83,6 +83,15 @@ For testing the loop without creating a commit:
 apos run examples/task-spec.sample.json --no-commit --allow-dirty
 ```
 
+If a Local Coder is expected to ask for extra context or write scope, pre-approve
+or pre-deny those requests:
+
+```bash
+apos run tasks/task-001.json --approve-read src/app/config.py
+apos run tasks/task-001.json --approve-write src/app/generated.py
+apos run tasks/task-001.json --deny-permission secrets.env
+```
+
 Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`,
 including the TaskSpec, attempt prompts, coder responses, test results, and
 final summary. APOS automatically excludes `.apos/runs/` from Git tracking for
@@ -107,6 +116,7 @@ deterministic score.
 apos benchmark validate examples/benchmarks/fast-track-suite.json
 apos benchmark show examples/benchmarks/fast-track-suite.json
 apos benchmark run examples/benchmarks/fast-track-suite.json
+apos benchmark run examples/benchmarks/fast-track-suite.json --approve-read src/app/config.py
 ```
 
 A benchmark suite groups TaskSpec files with comparison metadata such as

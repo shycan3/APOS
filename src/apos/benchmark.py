@@ -157,6 +157,9 @@ class BenchmarkRunOptions:
     allow_dirty: bool = False
     command_timeout_seconds: int | None = None
     keep_going: bool = False
+    approved_read: tuple[str, ...] = ()
+    approved_write: tuple[str, ...] = ()
+    denied_permissions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,9 @@ def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptio
                 no_commit=options.no_commit,
                 allow_dirty=options.allow_dirty,
                 command_timeout_seconds=options.command_timeout_seconds,
+                approved_read=options.approved_read,
+                approved_write=options.approved_write,
+                denied_permissions=options.denied_permissions,
             ),
         )
         duration_seconds = round(perf_counter() - started, 3)
@@ -411,6 +417,9 @@ def _runner_profile(root: Path, options: BenchmarkRunOptions) -> dict[str, objec
             "allow_dirty": options.allow_dirty,
             "command_timeout_seconds": options.command_timeout_seconds,
             "keep_going": options.keep_going,
+            "approved_read": list(options.approved_read),
+            "approved_write": list(options.approved_write),
+            "denied_permissions": list(options.denied_permissions),
         },
     }
 

@@ -184,6 +184,143 @@ class KernelTests(unittest.TestCase):
                 rollback = json.loads((run_log / "attempt-01" / "rollback.json").read_text(encoding="utf-8"))
                 self.assertEqual(rollback["status"], "PASS")
 
+    def test_continues_after_preapproved_read_permission_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+
+            (root / "app.py").write_text("def answer():\n    return 0\n", encoding="utf-8")
+            (root / "helper.py").write_text("ANSWER = 42\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                textwrap.dedent(
+                    """
+                    import unittest
+                    from app import answer
+
+
+                    class AnswerTests(unittest.TestCase):
+                        def test_answer(self):
+                            self.assertEqual(answer(), 42)
+
+
+                    if __name__ == "__main__":
+                        unittest.main()
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            with tempfile.TemporaryDirectory() as coder_tmp:
+                coder = Path(coder_tmp) / "permission_coder.py"
+                coder.write_text(
+                    textwrap.dedent(
+                        """
+                        import json
+                        import sys
+
+                        prompt = json.loads(sys.stdin.read())
+                        if prompt["attempt"] == 1:
+                            print(json.dumps({
+                                "type": "request_permission",
+                                "permission": "read",
+                                "path": "helper.py",
+                                "reason": "Need the expected answer constant.",
+                            }))
+                        else:
+                            assert "helper.py" in prompt["files"]
+                            print('''diff --git a/app.py b/app.py
+                        --- a/app.py
+                        +++ b/app.py
+                        @@ -1,2 +1,2 @@
+                         def answer():
+                        -    return 0
+                        +    return 42
+                        '''.replace("                        ", ""), end="")
+                        """
+                    ).lstrip(),
+                    encoding="utf-8",
+                )
+
+                spec = TaskSpec.from_mapping(
+                    {
+                        "task_id": "TASK-PERMISSION",
+                        "title": "Permission",
+                        "goal": "Make answer return the expected value.",
+                        "allowed_files": ["app.py"],
+                        "test_commands": [f"{sys.executable} -m unittest test_app.py"],
+                        "max_attempts": 2,
+                    }
+                )
+
+                summary = Kernel(root).run_task(
+                    spec,
+                    RunOptions(
+                        coder_command=f"{sys.executable} {coder}",
+                        no_commit=True,
+                        command_timeout_seconds=30,
+                        approved_read=("helper.py",),
+                    ),
+                )
+
+                self.assertEqual(summary.status, "PASS", summary.to_dict())
+                self.assertEqual([attempt.status for attempt in summary.attempts], ["PERMISSION_GRANTED", "PASS"])
+                prompt = json.loads((root / str(summary.run_log) / "attempt-02" / "prompt.json").read_text(encoding="utf-8"))
+                self.assertIn("helper.py", prompt["task"]["read_only_files"])
+                self.assertIn("helper.py", prompt["files"])
+
+    def test_stops_after_denied_permission_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+            (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            with tempfile.TemporaryDirectory() as coder_tmp:
+                coder = Path(coder_tmp) / "denied_coder.py"
+                coder.write_text(
+                    textwrap.dedent(
+                        """
+                        import json
+
+                        print(json.dumps({
+                            "type": "request_permission",
+                            "permission": "read",
+                            "path": "secret.py",
+                            "reason": "Need extra context.",
+                        }))
+                        """
+                    ).lstrip(),
+                    encoding="utf-8",
+                )
+                spec = TaskSpec.from_mapping(
+                    {
+                        "task_id": "TASK-DENIED",
+                        "goal": "Try to change app.",
+                        "allowed_files": ["app.py"],
+                        "test_commands": [f"{sys.executable} -m unittest discover"],
+                    }
+                )
+
+                summary = Kernel(root).run_task(
+                    spec,
+                    RunOptions(
+                        coder_command=f"{sys.executable} {coder}",
+                        no_commit=True,
+                        command_timeout_seconds=30,
+                        denied_permissions=("secret.py",),
+                    ),
+                )
+
+                self.assertEqual(summary.status, "PERMISSION_DENIED")
+                self.assertEqual(summary.attempts[0].status, "PERMISSION_DENIED")
+
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> None:
         completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)

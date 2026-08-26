@@ -14,6 +14,7 @@ APOS 0.1 focuses on one reliable task loop:
 - constrain writable files
 - request a patch from a Local Coder command
 - apply only authorized changes
+- continue through pre-approved permission requests
 - run verification commands
 - retry on failure
 - roll back failed attempt patches before retrying
