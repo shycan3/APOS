@@ -23,6 +23,32 @@
         "unit-test",
         "single-file"
       ]
+    },
+    {
+      "task_id": "TASK-003",
+      "path": "tasks/task-003-slugify.json",
+      "category": "code-change",
+      "difficulty": "medium",
+      "weight": 1,
+      "expected_minutes": 8,
+      "tags": [
+        "python",
+        "string-normalization",
+        "single-file"
+      ]
+    },
+    {
+      "task_id": "TASK-004",
+      "path": "tasks/task-004-active-todos.json",
+      "category": "code-change",
+      "difficulty": "medium",
+      "weight": 1,
+      "expected_minutes": 8,
+      "tags": [
+        "python",
+        "data-transform",
+        "single-file"
+      ]
     }
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "task_id": "TASK-004",
+  "title": "Filter active todos",
+  "goal": "Update sandbox/todo_app/todos.py so active_titles(items) returns titles for incomplete todos sorted by descending priority.",
+  "allowed_files": [
+    "sandbox/todo_app/todos.py"
+  ],
+  "read_only_files": [
+    "sandbox/todo_app/check_todos.py"
+  ],
+  "constraints": [
+    "Do not rename active_titles.",
+    "Do not modify the check file.",
+    "Treat missing priority as 0."
+  ],
+  "expected_behavior": [
+    "Completed todos are excluded.",
+    "Incomplete todos are sorted from highest priority to lowest priority."
+  ],
+  "test_commands": [
+    "python sandbox/todo_app/check_todos.py"
+  ],
+  "context_requirements": [],
+  "max_attempts": 3
+}
