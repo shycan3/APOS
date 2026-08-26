@@ -5,7 +5,15 @@ import sys
 import tempfile
 import unittest
 
-from apos.benchmark import BenchmarkError, BenchmarkRunOptions, BenchmarkSuite, run_benchmark_suite, validate_benchmark_suite
+from apos.benchmark import (
+    BenchmarkError,
+    BenchmarkRunOptions,
+    BenchmarkSuite,
+    list_benchmark_results,
+    load_benchmark_result,
+    run_benchmark_suite,
+    validate_benchmark_suite,
+)
 
 
 class BenchmarkSuiteTests(unittest.TestCase):
@@ -158,6 +166,25 @@ print('''diff --git a/app.py b/app.py
                 self.assertEqual(result["summary"]["passed_tasks"], 1)
                 self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
                 self.assertTrue((root / str(result["result_path"])).exists())
+
+                entries = list_benchmark_results(root)
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0].suite_id, "suite-1")
+                self.assertEqual(entries[0].passed_tasks, 1)
+
+                loaded = load_benchmark_result(root, str(result["result_path"]))
+                self.assertEqual(loaded["result_id"], result["result_id"])
+
+                list_output = self._run(root, [sys.executable, "-m", "apos", "benchmark", "results", "list"])
+                self.assertIn("suite-1", list_output.stdout)
+                self.assertIn("tasks=1/1", list_output.stdout)
+
+                show_output = self._run(
+                    root,
+                    [sys.executable, "-m", "apos", "benchmark", "results", "show", str(result["result_path"])],
+                )
+                self.assertIn("Benchmark result:", show_output.stdout)
+                self.assertIn("TASK-001", show_output.stdout)
 
     @staticmethod
     def _write_json(path: Path, data: object) -> None:

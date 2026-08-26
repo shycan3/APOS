@@ -113,6 +113,11 @@ category, difficulty, weight, tags, and metrics.
 Benchmark run results are written under `.apos/benchmarks/<suite-id>/<run-id>/`
 and include each task summary plus its quality report.
 
+```bash
+apos benchmark results list
+apos benchmark results show .apos/benchmarks/apos-fast-track-0-1/<run-id>/result.json
+```
+
 ## TaskSpec shape
 
 ```json

@@ -158,6 +158,31 @@ class BenchmarkRunOptions:
     keep_going: bool = False
 
 
+@dataclass(frozen=True)
+class BenchmarkResultEntry:
+    path: Path
+    relative_path: str
+    suite_id: str
+    result_id: str
+    status: str
+    started_at: str
+    total_tasks: int
+    passed_tasks: int
+    average_quality_score: float | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.relative_path,
+            "suite_id": self.suite_id,
+            "result_id": self.result_id,
+            "status": self.status,
+            "started_at": self.started_at,
+            "total_tasks": self.total_tasks,
+            "passed_tasks": self.passed_tasks,
+            "average_quality_score": self.average_quality_score,
+        }
+
+
 def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptions) -> dict[str, object]:
     root = GitClient(root).ensure_repo()
     suite = validate_benchmark_suite(root, suite_path)
@@ -208,6 +233,45 @@ def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptio
     return result
 
 
+def list_benchmark_results(root: Path, limit: int = 20) -> list[BenchmarkResultEntry]:
+    benchmarks_root = apos_dir(root) / "benchmarks"
+    if not benchmarks_root.exists():
+        return []
+
+    entries: list[BenchmarkResultEntry] = []
+    for result_path in benchmarks_root.glob("*/*/result.json"):
+        entry = _load_benchmark_result_entry(root, result_path)
+        if entry is not None:
+            entries.append(entry)
+
+    entries.sort(key=lambda entry: (entry.started_at, entry.relative_path), reverse=True)
+    return entries[:limit]
+
+
+def load_benchmark_result(root: Path, result_path: str) -> dict[str, object]:
+    path = resolve_benchmark_result_path(root, result_path)
+    result = _read_json(path)
+    result.setdefault("result_path", path.relative_to(root).as_posix())
+    return result
+
+
+def resolve_benchmark_result_path(root: Path, result_path: str) -> Path:
+    candidate = Path(result_path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    candidate = candidate.resolve()
+    if candidate.is_dir():
+        candidate = candidate / "result.json"
+    benchmarks_root = (apos_dir(root) / "benchmarks").resolve()
+    try:
+        candidate.relative_to(benchmarks_root)
+    except ValueError as exc:
+        raise FileNotFoundError(f"benchmark result is outside .apos/benchmarks: {result_path}") from exc
+    if not candidate.exists() or not candidate.is_file():
+        raise FileNotFoundError(f"benchmark result not found: {result_path}")
+    return candidate
+
+
 def _benchmark_result_path(root: Path, suite_id: str, result_id: str) -> Path:
     directory = apos_dir(root) / "benchmarks" / _slug(suite_id) / result_id
     directory.mkdir(parents=True, exist_ok=False)
@@ -249,6 +313,34 @@ def _benchmark_summary(tasks: list[dict[str, object]], total_tasks: int) -> dict
 
 def _write_json(path: Path, data: object) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _read_json(path: Path) -> dict[str, object]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise BenchmarkError(f"{path} must contain a JSON object")
+    return data
+
+
+def _load_benchmark_result_entry(root: Path, path: Path) -> BenchmarkResultEntry | None:
+    try:
+        result = _read_json(path)
+    except (OSError, json.JSONDecodeError, TypeError, BenchmarkError):
+        return None
+    suite = result.get("suite") if isinstance(result.get("suite"), dict) else {}
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    average = summary.get("average_quality_score")
+    return BenchmarkResultEntry(
+        path=path,
+        relative_path=path.relative_to(root).as_posix(),
+        suite_id=str(suite.get("suite_id") or ""),
+        result_id=str(result.get("result_id") or path.parent.name),
+        status=str(result.get("status") or "UNKNOWN"),
+        started_at=str(result.get("started_at") or ""),
+        total_tasks=int(summary.get("total_tasks") or 0),
+        passed_tasks=int(summary.get("passed_tasks") or 0),
+        average_quality_score=float(average) if isinstance(average, int | float) else None,
+    )
 
 
 def _required_string(data: dict[str, Any], key: str) -> str:

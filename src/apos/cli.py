@@ -7,7 +7,14 @@ import subprocess
 import sys
 
 from . import __version__
-from .benchmark import BenchmarkError, BenchmarkRunOptions, run_benchmark_suite, validate_benchmark_suite
+from .benchmark import (
+    BenchmarkError,
+    BenchmarkRunOptions,
+    list_benchmark_results,
+    load_benchmark_result,
+    run_benchmark_suite,
+    validate_benchmark_suite,
+)
 from .config import configured_ollama, ensure_project_memory, load_config, save_config
 from .draft import DraftError, draft_task_spec, refine_task_spec_with_ollama, write_task_spec
 from .git import GitClient, GitError
@@ -134,6 +141,19 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_run_parser.add_argument("--keep-going", action="store_true", help="continue after a failed benchmark task")
     benchmark_run_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark result")
     benchmark_run_parser.set_defaults(handler=cmd_benchmark_run)
+
+    benchmark_results_parser = benchmark_subcommands.add_parser("results", help="inspect benchmark run results")
+    benchmark_results_subcommands = benchmark_results_parser.add_subparsers(dest="benchmark_results_command")
+
+    benchmark_results_list_parser = benchmark_results_subcommands.add_parser("list", help="list recent benchmark results")
+    benchmark_results_list_parser.add_argument("--limit", type=int, default=20, help="maximum number of benchmark results to show")
+    benchmark_results_list_parser.add_argument("--json", action="store_true", help="print machine-readable result list")
+    benchmark_results_list_parser.set_defaults(handler=cmd_benchmark_results_list)
+
+    benchmark_results_show_parser = benchmark_results_subcommands.add_parser("show", help="show one benchmark result")
+    benchmark_results_show_parser.add_argument("result", help="benchmark result path or result directory")
+    benchmark_results_show_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark result")
+    benchmark_results_show_parser.set_defaults(handler=cmd_benchmark_results_show)
 
     return parser
 
@@ -386,6 +406,37 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
     else:
         _print_benchmark_result(result)
     return 0 if result.get("status") == "PASS" else 2
+
+
+def cmd_benchmark_results_list(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    entries = list_benchmark_results(root, limit=args.limit)
+    if args.json:
+        print(json.dumps([entry.to_dict() for entry in entries], indent=2, ensure_ascii=False))
+        return 0
+    if not entries:
+        print("No APOS benchmark results found.")
+        return 0
+    for entry in entries:
+        print(
+            f"{entry.relative_path}  {entry.status}  {entry.suite_id}  "
+            f"tasks={entry.passed_tasks}/{entry.total_tasks}  score={entry.average_quality_score}"
+        )
+    return 0
+
+
+def cmd_benchmark_results_show(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    try:
+        result = load_benchmark_result(root, args.result)
+    except FileNotFoundError as exc:
+        print(f"APOS error: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    _print_benchmark_result(result)
+    return 0
 
 
 def _print_summary(summary) -> None:
