@@ -90,7 +90,7 @@ class Kernel:
                 message = "Local Coder requested permission"
                 if request is not None:
                     message = f"{message}: {request.permission} {request.path} ({request.reason})"
-                    decision = _permission_decision(request, options)
+                    decision = _existing_permission_decision(request, spec) or _permission_decision(request, options)
                     if decision == "deny":
                         attempt = AttemptResult(attempt_number, "PERMISSION_DENIED", f"{message}; denied by APOS run options")
                         attempts.append(attempt)
@@ -213,6 +213,22 @@ def _permission_decision(request: ContextRequest, options: RunOptions) -> str | 
     if requested_path in approved_write:
         return "write"
     if requested_permission == "read" and requested_path in approved_read:
+        return "read"
+    return None
+
+
+def _existing_permission_decision(request: ContextRequest, spec: TaskSpec) -> str | None:
+    try:
+        requested_path = normalize_project_path(request.path)
+        readable = {normalize_project_path(path) for path in spec.read_only_files + spec.allowed_files}
+        writable = {normalize_project_path(path) for path in spec.allowed_files}
+    except PathPolicyError as exc:
+        raise KernelError(str(exc)) from exc
+
+    requested_permission = request.permission.lower()
+    if requested_path in writable:
+        return "write"
+    if requested_permission == "read" and requested_path in readable:
         return "read"
     return None
 

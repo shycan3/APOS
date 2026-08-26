@@ -6,11 +6,24 @@ import tempfile
 import textwrap
 import unittest
 
-from apos.kernel import Kernel, RunOptions
-from apos.models import TaskSpec
+from apos.kernel import Kernel, RunOptions, _existing_permission_decision
+from apos.models import ContextRequest, TaskSpec
 
 
 class KernelTests(unittest.TestCase):
+    def test_treats_existing_write_permission_request_as_granted(self):
+        spec = TaskSpec.from_mapping(
+            {
+                "task_id": "TASK-PERMISSION",
+                "goal": "Change app.",
+                "allowed_files": ["app.py"],
+                "test_commands": ["python -m unittest"],
+            }
+        )
+        request = ContextRequest(type="read_file", path="app.py", permission="write", reason="Need write access.")
+
+        self.assertEqual(_existing_permission_decision(request, spec), "write")
+
     def test_marks_task_passed_when_tests_already_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
