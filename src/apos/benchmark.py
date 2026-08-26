@@ -190,6 +190,8 @@ class BenchmarkResultEntry:
 
 def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptions) -> dict[str, object]:
     root = GitClient(root).ensure_repo()
+    git = GitClient(root)
+    start_branch = git.current_branch()
     suite = validate_benchmark_suite(root, suite_path)
     started_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     result_id = f"{started_at}-{uuid4().hex[:8]}"
@@ -198,19 +200,23 @@ def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptio
     for task_ref in suite.tasks:
         spec = TaskSpec.load(project_path(root, task_ref.path))
         started = perf_counter()
-        summary = Kernel(root).run_task(
-            spec,
-            RunOptions(
-                coder_command=options.coder_command,
-                max_attempts=options.max_attempts,
-                no_commit=options.no_commit,
-                allow_dirty=options.allow_dirty,
-                command_timeout_seconds=options.command_timeout_seconds,
-                approved_read=options.approved_read,
-                approved_write=options.approved_write,
-                denied_permissions=options.denied_permissions,
-            ),
-        )
+        try:
+            summary = Kernel(root).run_task(
+                spec,
+                RunOptions(
+                    coder_command=options.coder_command,
+                    max_attempts=options.max_attempts,
+                    no_commit=options.no_commit,
+                    allow_dirty=options.allow_dirty,
+                    command_timeout_seconds=options.command_timeout_seconds,
+                    approved_read=options.approved_read,
+                    approved_write=options.approved_write,
+                    denied_permissions=options.denied_permissions,
+                ),
+            )
+        finally:
+            if git.current_branch() != start_branch:
+                git.run(["checkout", start_branch])
         duration_seconds = round(perf_counter() - started, 3)
         report = generate_quality_report(root, summary.run_log) if summary.run_log else None
         tasks.append(

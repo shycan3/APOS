@@ -149,6 +149,7 @@ class BenchmarkSuiteTests(unittest.TestCase):
             )
             self._run(root, ["git", "add", "."])
             self._run(root, ["git", "commit", "-m", "initial"])
+            start_branch = self._run(root, ["git", "branch", "--show-current"]).stdout.strip()
 
             with tempfile.TemporaryDirectory() as coder_tmp:
                 coder = Path(coder_tmp) / "fake_coder.py"
@@ -180,6 +181,7 @@ print('''diff --git a/app.py b/app.py
                 self.assertIn("fake_coder.py", result["runner_profile"]["coder_command"])
                 self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
                 self.assertTrue((root / str(result["result_path"])).exists())
+                self.assertEqual(self._run(root, ["git", "branch", "--show-current"]).stdout.strip(), start_branch)
 
                 entries = list_benchmark_results(root)
                 self.assertEqual(len(entries), 1)

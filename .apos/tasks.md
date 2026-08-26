@@ -16,5 +16,6 @@
 - Done: add install/bootstrap command polish.
 - Done: add preflight PASS handling for already-satisfied benchmark tasks.
 - Done: actually run the fast-track benchmark and capture a result.
+- Done: restore the starting branch between benchmark tasks.
 - Next: add more benchmark tasks for broader 1.0 competitive testing.
 - Later: add Cloud Controller TaskSpec generation.
