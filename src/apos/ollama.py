@@ -71,6 +71,8 @@ def run_ollama(model: str, apos_prompt: str, ollama_binary: str, timeout_seconds
         [ollama_binary, "run", model],
         input=prompt,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         timeout=timeout_seconds,
     )
