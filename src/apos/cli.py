@@ -193,7 +193,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     created = ensure_project_memory(root)
     config = load_config(root)
     if args.ollama_model:
-        config.setdefault("local_coder", {})["command"] = _ollama_coder_command(args.ollama_model, args.ollama_binary)
+        config.setdefault("local_coder", {})["command"] = _ollama_coder_command(args.ollama_model, args.ollama_binary, args.ollama_host)
         config.setdefault("ollama", {})["model"] = args.ollama_model
         config.setdefault("ollama", {})["binary"] = args.ollama_binary
         config.setdefault("ollama", {})["host"] = args.ollama_host
@@ -220,7 +220,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
 
 
 def cmd_connect_ollama(args: argparse.Namespace) -> int:
-    command = _ollama_coder_command(args.model, args.ollama_binary)
+    command = _ollama_coder_command(args.model, args.ollama_binary, args.ollama_host)
     root = GitClient(Path.cwd()).ensure_repo()
     ensure_project_memory(root)
     config = load_config(root)
@@ -233,7 +233,7 @@ def cmd_connect_ollama(args: argparse.Namespace) -> int:
     return 0
 
 
-def _ollama_coder_command(model: str, binary: str) -> str:
+def _ollama_coder_command(model: str, binary: str, host: str) -> str:
     return subprocess.list2cmdline(
         [
             sys.executable,
@@ -243,6 +243,8 @@ def _ollama_coder_command(model: str, binary: str) -> str:
             model,
             "--ollama-binary",
             binary,
+            "--ollama-host",
+            host,
         ]
     )
 

@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m apos.ollama", description="APOS Ollama Local Coder adapter")
     parser.add_argument("--model", required=True, help="Ollama model name, for example qwen2.5-coder:7b")
     parser.add_argument("--ollama-binary", default="ollama", help="Ollama executable path")
+    parser.add_argument("--ollama-host", default="http://127.0.0.1:11434", help="Ollama HTTP API host")
     parser.add_argument("--timeout", type=int, default=300, help="Ollama command timeout in seconds")
     args = parser.parse_args(argv)
 
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             apos_prompt=apos_prompt,
             ollama_binary=args.ollama_binary,
+            ollama_host=args.ollama_host,
             timeout_seconds=args.timeout,
         )
     except subprocess.TimeoutExpired:
@@ -73,9 +75,17 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def run_ollama(model: str, apos_prompt: str, ollama_binary: str, timeout_seconds: int) -> str:
+def run_ollama(model: str, apos_prompt: str, ollama_binary: str, ollama_host: str, timeout_seconds: int) -> str:
     prompt = build_model_prompt(apos_prompt)
-    return run_ollama_prompt(model=model, prompt=prompt, ollama_binary=ollama_binary, timeout_seconds=timeout_seconds)
+    try:
+        return run_ollama_generate(
+            model=model,
+            prompt=prompt,
+            ollama_host=ollama_host,
+            timeout_seconds=timeout_seconds,
+        )
+    except RuntimeError:
+        return run_ollama_prompt(model=model, prompt=prompt, ollama_binary=ollama_binary, timeout_seconds=timeout_seconds)
 
 
 def run_ollama_prompt(model: str, prompt: str, ollama_binary: str, timeout_seconds: int) -> str:

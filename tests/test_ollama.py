@@ -1,7 +1,8 @@
 import json
 import unittest
+from unittest.mock import patch
 
-from apos.ollama import build_model_prompt, extract_protocol_output
+from apos.ollama import build_model_prompt, extract_protocol_output, run_ollama
 
 
 class OllamaAdapterTests(unittest.TestCase):
@@ -93,6 +94,35 @@ list[str]:\\n    return [str(item[\\\"title\\\"]) for item in items if not item[
 
         self.assertIn("APOS Local Coder", prompt)
         self.assertIn("APOS_LOCAL_CODER_PATCH_V1", prompt)
+
+    def test_run_ollama_prefers_http_generate(self):
+        with patch("apos.ollama.run_ollama_generate", return_value="patch") as generate:
+            with patch("apos.ollama.run_ollama_prompt") as prompt:
+                output = run_ollama(
+                    model="qwen-test",
+                    apos_prompt='{"task":{}}',
+                    ollama_binary="ollama",
+                    ollama_host="http://127.0.0.1:11434",
+                    timeout_seconds=10,
+                )
+
+        self.assertEqual(output, "patch")
+        generate.assert_called_once()
+        prompt.assert_not_called()
+
+    def test_run_ollama_falls_back_to_cli(self):
+        with patch("apos.ollama.run_ollama_generate", side_effect=RuntimeError("down")):
+            with patch("apos.ollama.run_ollama_prompt", return_value="fallback") as prompt:
+                output = run_ollama(
+                    model="qwen-test",
+                    apos_prompt='{"task":{}}',
+                    ollama_binary="ollama",
+                    ollama_host="http://127.0.0.1:11434",
+                    timeout_seconds=10,
+                )
+
+        self.assertEqual(output, "fallback")
+        prompt.assert_called_once()
 
 
 if __name__ == "__main__":

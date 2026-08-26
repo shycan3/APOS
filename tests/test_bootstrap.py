@@ -41,6 +41,7 @@ class BootstrapCliTests(unittest.TestCase):
             config = json.loads((root / ".apos" / "config.json").read_text(encoding="utf-8"))
             self.assertIn("qwen-test:7b", output.stdout)
             self.assertIn("apos.ollama", config["local_coder"]["command"])
+            self.assertIn("--ollama-host", config["local_coder"]["command"])
             self.assertEqual(config["ollama"]["model"], "qwen-test:7b")
             self.assertEqual(config["ollama"]["binary"], "C:\\Tools\\ollama.exe")
 

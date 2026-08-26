@@ -26,4 +26,5 @@
 - Failed patches that apply but do not pass verification are reverse-applied before the next retry.
 - Ollama 0.32.15 is installed locally and `qwen2.5-coder:7b` is available as the configured Local Coder model.
 - `.apos/config.json` stores Ollama model, binary path, and HTTP host metadata for reuse by planner-style commands.
+- The Ollama Local Coder adapter now uses the Ollama HTTP API first and falls back to the CLI runner if HTTP is unavailable.
 - Cloud Controller planning is not implemented in 0.1.

@@ -57,7 +57,8 @@ apos connect-ollama --model qwen2.5-coder:7b
 ```
 
 This requires Ollama to be installed and available on `PATH`, or passed with
-`--ollama-binary`.
+`--ollama-binary`. APOS uses Ollama's HTTP API first for cleaner machine output
+and falls back to the CLI runner if HTTP is unavailable.
 
 You can also connect any command directly:
 
