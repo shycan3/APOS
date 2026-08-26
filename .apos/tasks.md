@@ -23,5 +23,6 @@
 - Done: improve handling for malformed/corrupt Local Coder diffs with controlled file replacement output.
 - Done: rerun the expanded fast-track benchmark after file replacement support.
 - Done: promote APOS runtime metadata to 1.0.0.
+- Done: capture APOS Fast Track 1.0 benchmark result.
 - Next: prepare APOS self-evolution design for 1.1.
 - Later: add Cloud Controller TaskSpec generation.

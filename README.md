@@ -218,6 +218,6 @@ apos benchmark run examples/benchmarks/fast-track-suite.json --keep-going --max-
 Latest captured result:
 
 ```text
-.apos/benchmarks/apos-fast-track-0-1/20260826T181412Z-099006d0/result.json
-PASS, 3/3 tasks, average quality score 83.33
+.apos/benchmarks/apos-fast-track-1-0/20260826T181653Z-0b1a7959/result.json
+PASS, 3/3 tasks, average quality score 70.0
 ```

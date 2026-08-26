@@ -20,7 +20,7 @@
 - Benchmark results can be compared with `apos benchmark compare`, ranked by quality score, passed task count, and total duration.
 - Benchmark summaries aggregate primary failure classes and detailed failure reason counts.
 - The fast-track benchmark suite now contains 3 tasks: greeting, slug normalization, and active todo filtering.
-- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-0-1/20260826T181412Z-099006d0/result.json` (`PASS`, 3/3 tasks, average quality score 83.33, `--max-attempts 5`).
+- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-1-0/20260826T181653Z-0b1a7959/result.json` (`PASS`, 3/3 tasks, average quality score 70.0, `--max-attempts 5`).
 - The latest expanded benchmark recovered from earlier malformed/corrupt diff failures by using the Ollama HTTP adapter and controlled file replacement support.
 - Benchmark runs use per-result task branches and return to the starting branch after each task so larger suites can compare tasks from a consistent baseline.
 - Failed patches that apply but do not pass verification are reverse-applied before the next retry.
