@@ -477,7 +477,13 @@ def evaluate_candidate(
     elif not tests_passed:
         gates.append({"name": "benchmark", "status": "BLOCKED", "detail": "required tests failed"})
     else:
-        benchmark_result = _execute(policy.benchmark_command, workspace, timeout_seconds, environment)
+        benchmark_result = _execute(
+            policy.benchmark_command,
+            workspace,
+            timeout_seconds,
+            environment,
+            output_limit=None,
+        )
         if benchmark_result["status"] == "PASS":
             try:
                 benchmark_payload = _extract_json_object(str(benchmark_result.get("stdout") or ""))
@@ -506,7 +512,7 @@ def evaluate_candidate(
         else:
             benchmark_ok = False
             detail = f"benchmark command failed with exit code {benchmark_result['exit_code']}"
-        _gate(gates, "benchmark", benchmark_ok, detail, benchmark_result)
+        _gate(gates, "benchmark", benchmark_ok, detail, _bounded_execution_evidence(benchmark_result))
 
     failed = any(gate.get("status") in {"FAIL", "BLOCKED"} for gate in gates)
     if failed:
@@ -856,7 +862,13 @@ def _candidate_environment(workspace: Path) -> dict[str, str]:
     return environment
 
 
-def _execute(command: str, cwd: Path, timeout_seconds: int, environment: dict[str, str]) -> dict[str, object]:
+def _execute(
+    command: str,
+    cwd: Path,
+    timeout_seconds: int,
+    environment: dict[str, str],
+    output_limit: int | None = 6000,
+) -> dict[str, object]:
     try:
         completed = subprocess.run(
             command,
@@ -872,16 +884,16 @@ def _execute(command: str, cwd: Path, timeout_seconds: int, environment: dict[st
             "command": command,
             "status": status,
             "exit_code": completed.returncode,
-            "stdout": _tail(completed.stdout),
-            "stderr": _tail(completed.stderr),
+            "stdout": _limit_output(completed.stdout, output_limit),
+            "stderr": _limit_output(completed.stderr, output_limit),
         }
     except subprocess.TimeoutExpired as exc:
         return {
             "command": command,
             "status": "FAIL",
             "exit_code": 124,
-            "stdout": _tail(exc.stdout or ""),
-            "stderr": _tail(exc.stderr or ""),
+            "stdout": _limit_output(exc.stdout or "", output_limit),
+            "stderr": _limit_output(exc.stderr or "", output_limit),
             "error": f"timed out after {timeout_seconds}s",
         }
 
@@ -904,6 +916,13 @@ def _extract_json_object(value: str) -> dict[str, object]:
         if isinstance(payload, dict):
             return payload
     raise EvolutionError("benchmark command did not emit a JSON object")
+
+
+def _bounded_execution_evidence(result: dict[str, object]) -> dict[str, object]:
+    evidence = dict(result)
+    evidence["stdout"] = _tail(str(result.get("stdout") or ""))
+    evidence["stderr"] = _tail(str(result.get("stderr") or ""))
+    return evidence
 
 
 def _trusted_benchmark_replay(
@@ -1060,6 +1079,10 @@ def _write_json(path: Path, data: object) -> None:
 
 def _tail(value: str, max_chars: int = 6000) -> str:
     return value if len(value) <= max_chars else value[-max_chars:]
+
+
+def _limit_output(value: str, max_chars: int | None) -> str:
+    return value if max_chars is None else _tail(value, max_chars)
 
 
 def _now() -> str:

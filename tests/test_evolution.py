@@ -212,6 +212,7 @@ import subprocess
 branch = 'apos/benchmark/stub/task-eval'
 subprocess.run(['git', 'branch', '-f', branch, 'HEAD'], check=True)
 print(json.dumps({
+    'padding': 'x' * 7000,
     'status': 'PASS',
     'result_id': 'stub-result',
     'result_path': '.apos/benchmarks/stub/result.json',
