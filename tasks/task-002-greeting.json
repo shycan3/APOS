@@ -1,0 +1,24 @@
+{
+  "task_id": "TASK-002",
+  "title": "Add greeting message",
+  "goal": "Update sandbox/hello_app/greeting.py so greet(name) returns a friendly greeting instead of only the raw name.",
+  "allowed_files": [
+    "sandbox/hello_app/greeting.py"
+  ],
+  "read_only_files": [
+    "sandbox/hello_app/test_greeting.py"
+  ],
+  "constraints": [
+    "Do not rename greet.",
+    "Do not modify the test file.",
+    "Keep the function signature as greet(name: str) -> str."
+  ],
+  "expected_behavior": [
+    "greet(\"APOS\") returns \"Hello, APOS!\""
+  ],
+  "test_commands": [
+    "python -m unittest discover -s sandbox/hello_app"
+  ],
+  "context_requirements": [],
+  "max_attempts": 3
+}
