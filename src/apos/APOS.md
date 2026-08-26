@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Core Python package for the APOS 0.1 runtime.
+Core Python package for the APOS 1.0 runtime.
 
 ## Structure
 
@@ -21,4 +21,4 @@ Core Python package for the APOS 0.1 runtime.
 
 - Local Coder output is treated as data and must be validated before patch application.
 - A task succeeds only when verification commands pass.
-- Cloud Controller behavior is outside APOS 0.1.
+- Cloud Controller behavior is outside APOS 1.0.

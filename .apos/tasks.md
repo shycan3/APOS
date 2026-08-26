@@ -21,5 +21,7 @@
 - Done: isolate benchmark task branches per benchmark result.
 - Done: run the expanded fast-track benchmark and capture a 3-task result.
 - Done: improve handling for malformed/corrupt Local Coder diffs with controlled file replacement output.
-- Next: rerun the expanded fast-track benchmark after file replacement support.
+- Done: rerun the expanded fast-track benchmark after file replacement support.
+- Done: promote APOS runtime metadata to 1.0.0.
+- Next: prepare APOS self-evolution design for 1.1.
 - Later: add Cloud Controller TaskSpec generation.

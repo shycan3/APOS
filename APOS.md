@@ -6,7 +6,7 @@ This repository contains APOS, an AI Project Operating System prototype.
 
 ## Current Scope
 
-APOS 0.1 focuses on one reliable task loop:
+APOS 1.0 focuses on one reliable task loop:
 
 - accept a human-written TaskSpec
 - bootstrap project memory and optional Ollama configuration
@@ -33,7 +33,7 @@ APOS 0.1 focuses on one reliable task loop:
 
 ## Rules
 
-- Keep the Cloud Controller out of 0.1.
+- Keep the Cloud Controller out of 1.0.
 - Prefer patch-based coder output over direct file mutation.
 - Treat test/build execution as the success signal.
 - Keep project memory as current state, not an append-only reasoning log.

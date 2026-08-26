@@ -7,7 +7,7 @@ from typing import Any
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "version": "0.1",
+    "version": "1.0",
     "local_coder": {"command": None},
     "ollama": {"model": None, "binary": "ollama", "host": "http://127.0.0.1:11434"},
     "defaults": {

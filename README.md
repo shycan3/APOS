@@ -4,21 +4,23 @@ APOS is a local orchestration runtime for letting AI coding agents work inside a
 project with explicit task contracts, restricted write scope, verification, retry,
 Git history, and living documentation.
 
-## APOS 0.1
+## APOS 1.0
 
-The first version intentionally starts small:
+APOS 1.0 is a fast-track local runtime for competitive AI coding experiments:
 
 ```text
-human-written TaskSpec
+TaskSpec
 -> permission validation
--> patch-based Local Coder
+-> patch or controlled file replacement from a Local Coder
 -> test commands
 -> retry loop
 -> Git commit
+-> run log, quality report, benchmark result
 ```
 
-APOS 0.1 does not include a Cloud Controller yet. A human writes the TaskSpec,
-and APOS runs the implementation loop against a local coder command.
+APOS 1.0 does not include a Cloud Controller yet. A human, draft command, or
+refine command prepares the TaskSpec, and APOS runs the implementation loop
+against a local coder command.
 If a patch applies but verification fails, APOS rolls that patch back before the
 next retry so attempts do not accumulate broken intermediate edits.
 
@@ -45,7 +47,7 @@ apos bootstrap --ollama-model qwen2.5-coder:7b
 
 ## Configure a Local Coder
 
-APOS 0.1 expects a local coder command that reads a prompt from stdin and writes
+APOS 1.0 expects a local coder command that reads a prompt from stdin and writes
 either:
 
 - a unified diff patch to stdout
@@ -202,5 +204,20 @@ JSON permission request:
 }
 ```
 
-Permission escalation is detected in 0.1, but approval workflow is intentionally
-reserved for a later version.
+Permission escalation is supported through pre-approved or pre-denied run
+options in APOS 1.0.
+
+## Fast-track 1.0 benchmark
+
+The current local baseline is:
+
+```bash
+apos benchmark run examples/benchmarks/fast-track-suite.json --keep-going --max-attempts 5
+```
+
+Latest captured result:
+
+```text
+.apos/benchmarks/apos-fast-track-0-1/20260826T181412Z-099006d0/result.json
+PASS, 3/3 tasks, average quality score 83.33
+```

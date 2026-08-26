@@ -1,6 +1,6 @@
 # Current State
 
-- APOS 0.1 is implemented as a Python package in `src/apos`.
+- APOS 1.0 is implemented as a Python package in `src/apos`.
 - The CLI exposes `init`, `bootstrap`, `connect`, `connect-ollama`, `status`, `validate`, `task-template`, `draft`, `refine`, `run`, `runs`, `report`, and `benchmark`.
 - The `bootstrap` command initializes APOS memory and can configure an Ollama Local Coder in one step.
 - The `draft` command can generate a valid TaskSpec from explicit goal, allowed file, test, expectation, and constraint inputs.
@@ -20,11 +20,11 @@
 - Benchmark results can be compared with `apos benchmark compare`, ranked by quality score, passed task count, and total duration.
 - Benchmark summaries aggregate primary failure classes and detailed failure reason counts.
 - The fast-track benchmark suite now contains 3 tasks: greeting, slug normalization, and active todo filtering.
-- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-0-1/20260826T131603Z-d6399317/result.json` (`FAILED`, 2/3 tasks, average quality score 66.67).
-- The latest expanded benchmark failure is TASK-003, caused by malformed/corrupt diff output from the Ollama coder after the slug benchmark expectation was clarified.
+- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-0-1/20260826T181412Z-099006d0/result.json` (`PASS`, 3/3 tasks, average quality score 83.33, `--max-attempts 5`).
+- The latest expanded benchmark recovered from earlier malformed/corrupt diff failures by using the Ollama HTTP adapter and controlled file replacement support.
 - Benchmark runs use per-result task branches and return to the starting branch after each task so larger suites can compare tasks from a consistent baseline.
 - Failed patches that apply but do not pass verification are reverse-applied before the next retry.
 - Ollama 0.32.15 is installed locally and `qwen2.5-coder:7b` is available as the configured Local Coder model.
 - `.apos/config.json` stores Ollama model, binary path, and HTTP host metadata for reuse by planner-style commands.
 - The Ollama Local Coder adapter now uses the Ollama HTTP API first and falls back to the CLI runner if HTTP is unavailable.
-- Cloud Controller planning is not implemented in 0.1.
+- Cloud Controller planning is not implemented in 1.0.

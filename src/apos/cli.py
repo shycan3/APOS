@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="apos", description="APOS 0.1 local AI development runtime")
+    parser = argparse.ArgumentParser(prog="apos", description="APOS 1.0 local AI development runtime")
     parser.add_argument("--version", action="version", version=f"apos {__version__}")
 
     subcommands = parser.add_subparsers(dest="command")
@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     refine_parser.add_argument("--json", action="store_true", help="print machine-readable refine output")
     refine_parser.set_defaults(handler=cmd_refine)
 
-    run_parser = subcommands.add_parser("run", help="run an APOS 0.1 task loop")
+    run_parser = subcommands.add_parser("run", help="run an APOS task loop")
     run_parser.add_argument("taskspec", type=Path)
     run_parser.add_argument("--coder-command", help="override configured Local Coder command")
     run_parser.add_argument("--max-attempts", type=int, help="override retry budget")

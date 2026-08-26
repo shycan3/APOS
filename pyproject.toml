@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apos"
-version = "0.1.0"
-description = "AI Project Operating System prototype runtime"
+version = "1.0.0"
+description = "AI Project Operating System local orchestration runtime"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
@@ -15,4 +15,3 @@ apos = "apos.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

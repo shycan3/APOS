@@ -79,7 +79,7 @@ class BenchmarkSuite:
     suite_id: str
     title: str
     description: str
-    version: str = "0.1"
+    version: str = "1.0"
     tasks: list[BenchmarkTaskRef] = field(default_factory=list)
     metrics: list[str] = field(default_factory=list)
 
@@ -88,7 +88,7 @@ class BenchmarkSuite:
         suite_id = _required_string(data, "suite_id")
         title = _required_string(data, "title")
         description = _optional_string(data, "description", "")
-        version = _optional_string(data, "version", "0.1")
+        version = _optional_string(data, "version", "1.0")
         tasks_data = data.get("tasks")
         if not isinstance(tasks_data, list) or not tasks_data:
             raise BenchmarkError("tasks must contain at least one benchmark task")
