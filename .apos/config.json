@@ -1,7 +1,7 @@
 {
   "version": "0.1",
   "local_coder": {
-    "command": null
+    "command": "C:\\Users\\DH\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m apos.ollama --model qwen2.5-coder:7b --ollama-binary C:\\Users\\DH\\AppData\\Local\\Programs\\Ollama\\ollama.exe"
   },
   "defaults": {
     "branch_prefix": "apos/task-",
