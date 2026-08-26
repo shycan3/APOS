@@ -4,6 +4,35 @@ APOS is a local orchestration runtime for letting AI coding agents work inside a
 project with explicit task contracts, restricted write scope, verification, retry,
 Git history, and living documentation.
 
+## 한국어 빠른 시작
+
+APOS 1.1.1부터 사람이 보는 CLI 도움말과 일반 출력은 기본적으로
+한글입니다. 명령 이름과 `--json` 데이터 구조는 자동화 호환성을 위해
+기존 영문 규약을 유지합니다.
+
+```powershell
+cd C:\Users\DH\Documents\ChatGPT\APOS_PROJECT
+apos --help
+apos status
+apos evolution status
+```
+
+현재 APOS는 자연어를 계속 입력하는 대화형 화면이 아니라, PowerShell에서
+명령을 호출하는 CLI입니다. 다음 버전 개발은 제안서를 준비한 뒤 아래처럼
+실행합니다.
+
+```powershell
+apos evolution create <제안서.json> --candidate-id <후보-ID>
+apos evolution run <후보-ID>
+apos evolution evaluate <후보-ID>
+apos evolution review <후보-ID> --reviewer codex --decision approve --note "검수 근거"
+apos evolution review <후보-ID> --reviewer human --decision approve --note "사용자 승인"
+apos evolution status <후보-ID>
+```
+
+`PROMOTABLE`은 승격 가능한 상태라는 뜻이며, 실제 병합과 태그는 여전히
+사용자 통제 아래에서 수행합니다.
+
 ## APOS 1.1
 
 APOS 1.1 combines the proven 1.0 task runtime with a governed self-evolution

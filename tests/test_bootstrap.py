@@ -14,8 +14,8 @@ class BootstrapCliTests(unittest.TestCase):
 
             output = self._run(root, [sys.executable, "-m", "apos", "bootstrap"])
 
-            self.assertIn("APOS bootstrap complete.", output.stdout)
-            self.assertIn("Local Coder: <not configured>", output.stdout)
+            self.assertIn("APOS 부트스트랩 완료.", output.stdout)
+            self.assertIn("로컬 코더: <설정되지 않음>", output.stdout)
             self.assertTrue((root / ".apos" / "config.json").exists())
             self.assertTrue((root / ".apos" / "current.md").exists())
 
@@ -47,7 +47,7 @@ class BootstrapCliTests(unittest.TestCase):
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True, encoding="utf-8")
         if completed.returncode != 0:
             raise AssertionError(completed.stderr or completed.stdout)
         return completed
