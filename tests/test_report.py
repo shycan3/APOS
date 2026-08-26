@@ -76,6 +76,32 @@ class QualityReportTests(unittest.TestCase):
         self.assertTrue(report["failure"]["recovered"])
         self.assertEqual(report["failure"]["reasons"][0]["code"], "verification_failed")
 
+    def test_counts_file_replacement_responses(self):
+        report = build_quality_report(
+            {
+                "path": ".apos/runs/task-replace/run-1",
+                "run": {"task_id": "TASK-REPLACE", "title": "Replace", "branch": "apos/task-replace"},
+                "task": {"task_id": "TASK-REPLACE"},
+                "summary": {
+                    "status": "PASS",
+                    "task_id": "TASK-REPLACE",
+                    "branch": "apos/task-replace",
+                    "attempts": [{"attempt": 1, "status": "PASS"}],
+                    "committed": True,
+                },
+                "attempts": [
+                    {
+                        "result": {"attempt": 1, "status": "PASS", "message": "ok"},
+                        "response": {"type": "file_replacement", "path": "app.py"},
+                        "tests": [{"status": "PASS", "exit_code": 0}],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(report["responses"]["file_replacement"], 1)
+        self.assertEqual(report["failure"]["primary"], "none")
+
     def test_classifies_permission_blocked_runs(self):
         report = build_quality_report(
             {

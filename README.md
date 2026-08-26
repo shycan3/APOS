@@ -49,6 +49,7 @@ APOS 0.1 expects a local coder command that reads a prompt from stdin and writes
 either:
 
 - a unified diff patch to stdout
+- a JSON file replacement for one allowed file
 - or a JSON permission request
 
 ```bash
@@ -177,6 +178,16 @@ diff --git a/src/app/greeting.py b/src/app/greeting.py
  def greet(name):
 -    return name
 +    return f"Hello, {name}!"
+```
+
+JSON file replacement:
+
+```json
+{
+  "type": "file_replacement",
+  "path": "src/app/greeting.py",
+  "content": "def greet(name):\n    return f\"Hello, {name}!\"\n"
+}
 ```
 
 JSON permission request:

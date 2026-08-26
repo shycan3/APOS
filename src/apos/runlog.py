@@ -67,18 +67,31 @@ class RunRecorder:
     def record_prompt(self, attempt: int, prompt: str) -> None:
         self.write_text(f"attempt-{attempt:02d}/prompt.json", prompt)
 
-    def record_response(self, attempt: int, response_type: str, patch: str, message: str, request: ContextRequest | None) -> None:
+    def record_response(
+        self,
+        attempt: int,
+        response_type: str,
+        patch: str,
+        message: str,
+        request: ContextRequest | None,
+        path: str = "",
+        content: str = "",
+    ) -> None:
         self.write_json(
             f"attempt-{attempt:02d}/response.json",
             {
                 "type": response_type,
                 "message": message,
                 "request": _request_to_dict(request),
+                "path": path or None,
                 "patch_file": "response.patch" if patch else None,
+                "content_file": "replacement.txt" if content else None,
             },
         )
         if patch:
             self.write_text(f"attempt-{attempt:02d}/response.patch", patch)
+        if content:
+            self.write_text(f"attempt-{attempt:02d}/replacement.txt", content)
 
     def record_tests(self, attempt: int, results: list[ExecutionResult]) -> None:
         self.write_json(f"attempt-{attempt:02d}/tests.json", [result.to_dict() for result in results])
@@ -151,6 +164,7 @@ def load_run_log(root: Path, run_path: str) -> dict[str, object]:
                 "rollback": _read_json_if_exists(attempt_path / "rollback.json"),
                 "prompt_file": _relative_if_exists(root, attempt_path / "prompt.json"),
                 "patch_file": _relative_if_exists(root, attempt_path / "response.patch"),
+                "replacement_file": _relative_if_exists(root, attempt_path / "replacement.txt"),
             }
         )
     return {

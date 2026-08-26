@@ -14,6 +14,7 @@ APOS 0.1 focuses on one reliable task loop:
 - refine TaskSpec JSON with the configured Ollama model
 - constrain writable files
 - request a patch from a Local Coder command
+- accept controlled file replacement output when diff generation is unreliable
 - apply only authorized changes
 - continue through pre-approved permission requests
 - run verification commands

@@ -20,5 +20,6 @@
 - Done: add more benchmark tasks for broader 1.0 competitive testing.
 - Done: isolate benchmark task branches per benchmark result.
 - Done: run the expanded fast-track benchmark and capture a 3-task result.
-- Next: improve handling for malformed/corrupt Local Coder diffs.
+- Done: improve handling for malformed/corrupt Local Coder diffs with controlled file replacement output.
+- Next: rerun the expanded fast-track benchmark after file replacement support.
 - Later: add Cloud Controller TaskSpec generation.

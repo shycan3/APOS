@@ -569,7 +569,11 @@ def _print_quality_report(report: dict[str, object]) -> None:
     print(f"Score: {quality.get('score')}")
     print(f"Attempts: {report.get('attempts')}")
     print(f"Tests: {tests.get('passed')}/{tests.get('total')} passed, {tests.get('failed')} failed")
-    print(f"Responses: patch={responses.get('patch')}, permission_requests={responses.get('permission_requests')}")
+    print(
+        f"Responses: patch={responses.get('patch')}, "
+        f"file_replacement={responses.get('file_replacement')}, "
+        f"permission_requests={responses.get('permission_requests')}"
+    )
     print(f"Rollbacks: passed={rollbacks.get('passed')}, failed={rollbacks.get('failed')}")
     print(f"Failure: primary={failure.get('primary') or 'none'}, recovered={failure.get('recovered') or False}")
     if report.get("commit_hash"):

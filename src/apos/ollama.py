@@ -15,7 +15,9 @@ exactly one APOS protocol response.
 
 Allowed responses:
 1. A unified diff patch.
-2. A JSON permission request:
+2. A JSON file replacement when a diff is hard to express:
+   {"type":"file_replacement","path":"...","content":"complete final file text"}
+3. A JSON permission request:
    {"type":"request_permission","path":"...","permission":"read","reason":"..."}
 
 Rules:
@@ -23,6 +25,7 @@ Rules:
 - Do not use markdown fences.
 - Do not explain the change.
 - Modify only files listed in task.allowed_files.
+- Use file_replacement if a previous diff failed to apply or the edit is easier as a complete file.
 - If required information or write access is missing, return a permission request.
 - Preserve existing public APIs unless the TaskSpec explicitly permits a change.
 """
@@ -165,7 +168,7 @@ def _extract_json(value: str) -> str:
         payload = _recover_permission_request(value)
         if payload is None:
             return ""
-    if payload.get("type") not in {"request_permission", "patch"}:
+    if payload.get("type") not in {"request_permission", "patch", "file_replacement"}:
         return ""
     return json.dumps(payload, ensure_ascii=False)
 

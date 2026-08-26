@@ -21,6 +21,8 @@ class CoderResponse:
     patch: str = ""
     message: str = ""
     request: ContextRequest | None = None
+    path: str = ""
+    content: str = ""
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,14 @@ def parse_coder_output(output: str) -> CoderResponse:
             if not isinstance(patch, str) or not patch.strip():
                 raise CoderError("JSON patch output must include a non-empty patch string")
             return CoderResponse(type="patch", patch=patch)
+        if payload.get("type") == "file_replacement":
+            path = payload.get("path")
+            content = payload.get("content")
+            if not isinstance(path, str) or not path.strip():
+                raise CoderError("JSON file_replacement output must include a non-empty path string")
+            if not isinstance(content, str):
+                raise CoderError("JSON file_replacement output must include a content string")
+            return CoderResponse(type="file_replacement", path=path, content=content)
         raise CoderError(f"unsupported JSON coder output type: {payload.get('type')}")
     return CoderResponse(type="patch", patch=output)
 
@@ -85,7 +95,9 @@ def build_coder_prompt(root: Path, spec: TaskSpec, attempt: int, previous_error:
     payload = {
         "protocol": "APOS_LOCAL_CODER_PATCH_V1",
         "instructions": [
-            "Return only a unified diff patch, or a JSON request_permission object.",
+            "Return only a unified diff patch, a JSON file_replacement object, or a JSON request_permission object.",
+            "Use file_replacement when a previous unified diff failed to apply or the edit is easier to express as a complete file.",
+            "A file_replacement object must be {\"type\":\"file_replacement\",\"path\":\"path/to/file\",\"content\":\"complete final file text\"}.",
             "Modify only files listed in allowed_files.",
             "Preserve the existing public API unless the TaskSpec explicitly allows a change.",
             "Do not include prose, markdown fences, or explanations around the patch.",

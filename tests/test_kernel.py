@@ -245,6 +245,148 @@ class KernelTests(unittest.TestCase):
                 rollback = json.loads((run_log / "attempt-01" / "rollback.json").read_text(encoding="utf-8"))
                 self.assertEqual(rollback["status"], "PASS")
 
+    def test_applies_file_replacement_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+
+            (root / "app.py").write_text("def answer():\n    return 0\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                textwrap.dedent(
+                    """
+                    import unittest
+                    from app import answer
+
+
+                    class AnswerTests(unittest.TestCase):
+                        def test_answer(self):
+                            self.assertEqual(answer(), 42)
+
+
+                    if __name__ == "__main__":
+                        unittest.main()
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            with tempfile.TemporaryDirectory() as coder_tmp:
+                coder = Path(coder_tmp) / "replacement_coder.py"
+                coder.write_text(
+                    textwrap.dedent(
+                        """
+                        import json
+
+                        print(json.dumps({
+                            "type": "file_replacement",
+                            "path": "app.py",
+                            "content": "def answer():\\n    return 42\\n",
+                        }))
+                        """
+                    ).lstrip(),
+                    encoding="utf-8",
+                )
+                spec = TaskSpec.from_mapping(
+                    {
+                        "task_id": "TASK-REPLACE",
+                        "title": "Replace",
+                        "goal": "Make answer return 42.",
+                        "allowed_files": ["app.py"],
+                        "test_commands": [f"{sys.executable} -m unittest test_app.py"],
+                    }
+                )
+
+                summary = Kernel(root).run_task(
+                    spec,
+                    RunOptions(
+                        coder_command=f"{sys.executable} {coder}",
+                        no_commit=True,
+                        command_timeout_seconds=30,
+                    ),
+                )
+
+                self.assertEqual(summary.status, "PASS", summary.to_dict())
+                self.assertEqual(summary.attempts[0].message, "tests passed after replacing app.py")
+                self.assertIn("return 42", (root / "app.py").read_text(encoding="utf-8"))
+                run_log = root / str(summary.run_log)
+                response = json.loads((run_log / "attempt-01" / "response.json").read_text(encoding="utf-8"))
+                self.assertEqual(response["type"], "file_replacement")
+                self.assertTrue((run_log / "attempt-01" / "replacement.txt").exists())
+
+    def test_rolls_back_failed_file_replacement(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+
+            (root / "app.py").write_text("def answer():\n    return 0\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                textwrap.dedent(
+                    """
+                    import unittest
+                    from app import answer
+
+
+                    class AnswerTests(unittest.TestCase):
+                        def test_answer(self):
+                            self.assertEqual(answer(), 42)
+
+
+                    if __name__ == "__main__":
+                        unittest.main()
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            with tempfile.TemporaryDirectory() as coder_tmp:
+                coder = Path(coder_tmp) / "bad_replacement_coder.py"
+                coder.write_text(
+                    textwrap.dedent(
+                        """
+                        import json
+
+                        print(json.dumps({
+                            "type": "file_replacement",
+                            "path": "app.py",
+                            "content": "def answer():\\n    return -1\\n",
+                        }))
+                        """
+                    ).lstrip(),
+                    encoding="utf-8",
+                )
+                spec = TaskSpec.from_mapping(
+                    {
+                        "task_id": "TASK-REPLACE-FAIL",
+                        "title": "Replace fail",
+                        "goal": "Make answer return 42.",
+                        "allowed_files": ["app.py"],
+                        "test_commands": [f"{sys.executable} -m unittest test_app.py"],
+                        "max_attempts": 1,
+                    }
+                )
+
+                summary = Kernel(root).run_task(
+                    spec,
+                    RunOptions(
+                        coder_command=f"{sys.executable} {coder}",
+                        no_commit=True,
+                        command_timeout_seconds=30,
+                    ),
+                )
+
+                self.assertEqual(summary.status, "FAILED", summary.to_dict())
+                self.assertIn("return 0", (root / "app.py").read_text(encoding="utf-8"))
+                rollback = json.loads((root / str(summary.run_log) / "attempt-01" / "rollback.json").read_text(encoding="utf-8"))
+                self.assertEqual(rollback["status"], "PASS")
+
     def test_continues_after_preapproved_read_permission_request(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

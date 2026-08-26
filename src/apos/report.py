@@ -17,6 +17,7 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
 
     attempt_statuses: list[str] = []
     patch_responses = 0
+    file_replacements = 0
     permission_requests = 0
     tests_total = 0
     tests_passed = 0
@@ -40,6 +41,8 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
         response_type = response.get("type")
         if response_type == "patch":
             patch_responses += 1
+        elif response_type == "file_replacement":
+            file_replacements += 1
         elif response_type == "request_permission":
             permission_requests += 1
 
@@ -85,6 +88,7 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
         "attempt_statuses": attempt_statuses,
         "responses": {
             "patch": patch_responses,
+            "file_replacement": file_replacements,
             "permission_requests": permission_requests,
         },
         "tests": {
@@ -145,7 +149,9 @@ def _attempt_failure_codes(
         codes.append("empty_patch")
     if "git apply" in normalized_message and "failed" in normalized_message:
         codes.append("patch_apply_failed")
-    if response_type not in ("patch", "request_permission"):
+    if response_type == "file_replacement":
+        codes.append("file_replacement_failed")
+    if response_type not in ("patch", "file_replacement", "request_permission"):
         codes.append("patch_generation_failed")
     if failed_tests:
         codes.append("verification_failed")
@@ -188,6 +194,7 @@ def _primary_failure(status: str, failure_counts: dict[str, int]) -> str:
         "patch_apply_failed",
         "empty_patch",
         "verification_failed",
+        "file_replacement_failed",
         "patch_generation_failed",
         "unknown_failure",
     ]

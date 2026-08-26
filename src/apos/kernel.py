@@ -9,7 +9,7 @@ from .config import configured_coder_command, load_config
 from .executor import run_commands
 from .git import GitClient, GitError
 from .models import AttemptResult, ContextRequest, PermissionSpec, RunSummary, TaskSpec
-from .pathing import PathPolicyError, normalize_project_path
+from .pathing import PathPolicyError, normalize_project_path, project_path
 from .permissions import PermissionError, PermissionManager
 from .runlog import RunRecorder
 
@@ -83,6 +83,8 @@ class Kernel:
                 response.patch,
                 response.message,
                 response.request,
+                response.path,
+                response.content,
             )
 
             if response.type == "request_permission":
@@ -108,6 +110,55 @@ class Kernel:
                 attempts.append(attempt)
                 recorder.record_attempt(attempt)
                 return self._finish(recorder, RunSummary("NEEDS_PERMISSION", spec.task_id, branch, attempts))
+
+            if response.type == "file_replacement":
+                changed_by_patch: list[str] = []
+                original: tuple[bool, str] | None = None
+                try:
+                    changed_path, original = self._apply_file_replacement(response.path, response.content, permissions)
+                    changed_by_patch = [changed_path]
+                except (PermissionError, OSError, PathPolicyError) as exc:
+                    message = str(exc)
+                    attempt = AttemptResult(attempt_number, "FAILED", message)
+                    attempts.append(attempt)
+                    recorder.record_attempt(attempt)
+                    previous_error = message
+                    continue
+
+                test_results = run_commands(spec.test_commands, cwd=self.root, timeout_seconds=timeout)
+                recorder.record_tests(attempt_number, test_results)
+                if all(result.passed for result in test_results):
+                    attempt = AttemptResult(
+                        attempt_number,
+                        "PASS",
+                        f"tests passed after replacing {changed_by_patch[0]}",
+                        test_results,
+                    )
+                    attempts.append(attempt)
+                    recorder.record_attempt(attempt)
+                    if options.no_commit:
+                        return self._finish(recorder, RunSummary("PASS", spec.task_id, branch, attempts, committed=False))
+                    commit_hash = self.git.commit(
+                        changed_by_patch,
+                        f"APOS {spec.task_id}: {spec.display_title()}",
+                    )
+                    return self._finish(
+                        recorder,
+                        RunSummary("PASS", spec.task_id, branch, attempts, committed=True, commit_hash=commit_hash),
+                    )
+
+                previous_error = summarize_failures(test_results)
+                previous_error = self._rollback_file_replacement(
+                    recorder,
+                    attempt_number,
+                    changed_by_patch[0],
+                    original,
+                    previous_error,
+                )
+                attempt = AttemptResult(attempt_number, "FAILED", previous_error, test_results)
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
+                continue
 
             if response.type != "patch":
                 message = response.message or "Local Coder did not return a patch"
@@ -195,6 +246,44 @@ class Kernel:
             recorder.record_rollback(attempt, "FAILED", rollback_message)
             return f"{message}\n{rollback_message}"
         recorder.record_rollback(attempt, "PASS", "failed attempt patch was rolled back")
+        return message
+
+    def _apply_file_replacement(
+        self,
+        relative_path: str,
+        content: str,
+        permissions: PermissionManager,
+    ) -> tuple[str, tuple[bool, str]]:
+        normalized_path = normalize_project_path(relative_path)
+        permissions.validate_write_paths([normalized_path])
+        target = project_path(self.root, normalized_path)
+        original = (target.exists(), target.read_text(encoding="utf-8", errors="replace") if target.exists() else "")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return normalized_path, original
+
+    def _rollback_file_replacement(
+        self,
+        recorder: RunRecorder,
+        attempt: int,
+        relative_path: str,
+        original: tuple[bool, str] | None,
+        message: str,
+    ) -> str:
+        try:
+            if original is None:
+                raise OSError("missing original file state")
+            existed, content = original
+            target = project_path(self.root, relative_path)
+            if existed:
+                target.write_text(content, encoding="utf-8")
+            elif target.exists():
+                target.unlink()
+        except (OSError, PathPolicyError) as exc:
+            rollback_message = f"rollback failed: {exc}"
+            recorder.record_rollback(attempt, "FAILED", rollback_message)
+            return f"{message}\n{rollback_message}"
+        recorder.record_rollback(attempt, "PASS", "failed file replacement was rolled back")
         return message
 
 

@@ -45,6 +45,15 @@ diff --git a/app.py b/app.py
 
         self.assertEqual(json.loads(extract_protocol_output(json.dumps(request))), request)
 
+    def test_extracts_file_replacement_json(self):
+        replacement = {
+            "type": "file_replacement",
+            "path": "app.py",
+            "content": "def answer():\n    return 42\n",
+        }
+
+        self.assertEqual(json.loads(extract_protocol_output(json.dumps(replacement))), replacement)
+
     def test_recovers_fenced_permission_request_with_terminal_controls(self):
         output = """```json
 {
