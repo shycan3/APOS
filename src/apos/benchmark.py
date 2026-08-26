@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -197,8 +197,18 @@ def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptio
     result_id = f"{started_at}-{uuid4().hex[:8]}"
 
     tasks: list[dict[str, object]] = []
+    branch_prefix = f"apos/benchmark/{_slug(result_id)}/"
     for task_ref in suite.tasks:
         spec = TaskSpec.load(project_path(root, task_ref.path))
+        if spec.branch is None:
+            spec = replace(
+                spec,
+                branch=git.branch_name_for_task(
+                    spec.task_id,
+                    spec.display_title(),
+                    prefix=branch_prefix,
+                ),
+            )
         started = perf_counter()
         try:
             summary = Kernel(root).run_task(

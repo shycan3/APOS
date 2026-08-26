@@ -182,6 +182,7 @@ print('''diff --git a/app.py b/app.py
                 self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
                 self.assertTrue((root / str(result["result_path"])).exists())
                 self.assertEqual(self._run(root, ["git", "branch", "--show-current"]).stdout.strip(), start_branch)
+                self.assertIn("apos/benchmark/", result["tasks"][0]["summary"]["branch"])
 
                 entries = list_benchmark_results(root)
                 self.assertEqual(len(entries), 1)
