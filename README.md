@@ -69,6 +69,11 @@ For testing the loop without creating a commit:
 apos run examples/task-spec.sample.json --no-commit --allow-dirty
 ```
 
+Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`,
+including the TaskSpec, attempt prompts, coder responses, test results, and
+final summary. APOS automatically excludes `.apos/runs/` from Git tracking for
+the local repository.
+
 ## TaskSpec shape
 
 ```json

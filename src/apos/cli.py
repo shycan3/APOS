@@ -185,6 +185,8 @@ def _print_summary(summary) -> None:
         print(f"Commit: {summary.commit_hash}")
     elif summary.status == "PASS":
         print("Commit: skipped")
+    if summary.run_log:
+        print(f"Run log: {summary.run_log}")
 
 
 if __name__ == "__main__":

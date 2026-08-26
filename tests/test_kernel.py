@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import subprocess
 import sys
 import tempfile
@@ -82,12 +83,35 @@ class KernelTests(unittest.TestCase):
 
                 self.assertEqual(summary.status, "PASS", summary.to_dict())
                 self.assertIn('return f"Hello, {name}!"', (root / "app.py").read_text(encoding="utf-8"))
+                self.assertIsNotNone(summary.run_log)
+
+                run_log = root / str(summary.run_log)
+                self.assertTrue((run_log / "run.json").exists())
+                self.assertTrue((run_log / "task.json").exists())
+                self.assertTrue((run_log / "attempt-01" / "prompt.json").exists())
+                self.assertTrue((run_log / "attempt-01" / "response.patch").exists())
+                self.assertTrue((run_log / "attempt-01" / "tests.json").exists())
+                self.assertTrue((run_log / "summary.json").exists())
+
+                summary_data = json.loads((run_log / "summary.json").read_text(encoding="utf-8"))
+                self.assertEqual(summary_data["status"], "PASS")
+                self.assertEqual(summary_data["run_log"], summary.run_log)
+
+                status = self._git_status(root)
+                self.assertNotIn(".apos/runs", status)
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> None:
         completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
         if completed.returncode != 0:
             raise AssertionError(completed.stderr or completed.stdout)
+
+    @staticmethod
+    def _git_status(cwd: Path) -> str:
+        completed = subprocess.run(["git", "status", "--porcelain"], cwd=cwd, text=True, capture_output=True)
+        if completed.returncode != 0:
+            raise AssertionError(completed.stderr or completed.stdout)
+        return completed.stdout
 
 
 if __name__ == "__main__":

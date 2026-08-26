@@ -15,6 +15,7 @@ APOS 0.1 focuses on one reliable task loop:
 - run verification commands
 - retry on failure
 - commit successful task results
+- write inspectable run logs under `.apos/runs/`
 
 ## Rules
 
@@ -22,4 +23,3 @@ APOS 0.1 focuses on one reliable task loop:
 - Prefer patch-based coder output over direct file mutation.
 - Treat test/build execution as the success signal.
 - Keep project memory as current state, not an append-only reasoning log.
-

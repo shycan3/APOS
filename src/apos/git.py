@@ -53,6 +53,16 @@ class GitClient:
         untracked = self.run(["ls-files", "--others", "--exclude-standard"], check=False).stdout.splitlines()
         return sorted(set(tracked + staged + untracked))
 
+    def exclude_path(self, pattern: str) -> None:
+        exclude_path = self.run(["rev-parse", "--git-path", "info/exclude"]).stdout.strip()
+        path = self.root / exclude_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+        if pattern in existing.splitlines():
+            return
+        prefix = "" if existing.endswith("\n") or not existing else "\n"
+        path.write_text(f"{existing}{prefix}# APOS runtime artifacts\n{pattern}\n", encoding="utf-8")
+
     def branch_name_for_task(self, task_id: str, title: str, prefix: str = "apos/task-") -> str:
         normalized_id = _slug(task_id)
         if normalized_id.startswith("task-"):

@@ -9,6 +9,7 @@ from .executor import run_commands
 from .git import GitClient, GitError
 from .models import AttemptResult, PermissionSpec, RunSummary, TaskSpec
 from .permissions import PermissionError, PermissionManager
+from .runlog import RunRecorder
 
 
 class KernelError(RuntimeError):
@@ -49,6 +50,8 @@ class Kernel:
             prefix=str(defaults.get("branch_prefix", "apos/task-")),
         )
         self.git.checkout_task_branch(branch)
+        self.git.exclude_path(".apos/runs/")
+        recorder = RunRecorder(self.root, spec, branch)
 
         timeout = int(options.command_timeout_seconds or defaults.get("command_timeout_seconds", 120))
         max_attempts = int(options.max_attempts or spec.max_attempts or defaults.get("max_attempts", 3))
@@ -60,19 +63,31 @@ class Kernel:
 
         for attempt_number in range(1, max_attempts + 1):
             prompt = build_coder_prompt(self.root, spec, attempt_number, previous_error)
+            recorder.record_prompt(attempt_number, prompt)
             response = coder.run(prompt)
+            recorder.record_response(
+                attempt_number,
+                response.type,
+                response.patch,
+                response.message,
+                response.request,
+            )
 
             if response.type == "request_permission":
                 request = response.request
                 message = "Local Coder requested permission"
                 if request is not None:
                     message = f"{message}: {request.permission} {request.path} ({request.reason})"
-                attempts.append(AttemptResult(attempt_number, "NEEDS_PERMISSION", message))
-                return RunSummary("NEEDS_PERMISSION", spec.task_id, branch, attempts)
+                attempt = AttemptResult(attempt_number, "NEEDS_PERMISSION", message)
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
+                return self._finish(recorder, RunSummary("NEEDS_PERMISSION", spec.task_id, branch, attempts))
 
             if response.type != "patch":
                 message = response.message or "Local Coder did not return a patch"
-                attempts.append(AttemptResult(attempt_number, "FAILED", message))
+                attempt = AttemptResult(attempt_number, "FAILED", message)
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
                 previous_error = message
                 continue
 
@@ -83,38 +98,61 @@ class Kernel:
                 permissions.validate_write_paths(changed_in_repo)
             except (PermissionError, GitError) as exc:
                 message = str(exc)
-                attempts.append(AttemptResult(attempt_number, "FAILED", message))
+                attempt = AttemptResult(attempt_number, "FAILED", message)
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
                 previous_error = message
                 continue
 
             test_results = run_commands(spec.test_commands, cwd=self.root, timeout_seconds=timeout)
+            recorder.record_tests(attempt_number, test_results)
             if all(result.passed for result in test_results):
                 try:
                     changed_in_repo = self.git.changed_files()
                     permissions.validate_write_paths(changed_in_repo)
                 except PermissionError as exc:
                     message = str(exc)
-                    attempts.append(AttemptResult(attempt_number, "FAILED", message, test_results))
+                    attempt = AttemptResult(attempt_number, "FAILED", message, test_results)
+                    attempts.append(attempt)
+                    recorder.record_attempt(attempt)
                     previous_error = message
                     continue
 
-                attempts.append(
-                    AttemptResult(
-                        attempt_number,
-                        "PASS",
-                        f"tests passed after modifying {', '.join(changed_by_patch)}",
-                        test_results,
-                    )
+                attempt = AttemptResult(
+                    attempt_number,
+                    "PASS",
+                    f"tests passed after modifying {', '.join(changed_by_patch)}",
+                    test_results,
                 )
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
                 if options.no_commit:
-                    return RunSummary("PASS", spec.task_id, branch, attempts, committed=False)
+                    return self._finish(recorder, RunSummary("PASS", spec.task_id, branch, attempts, committed=False))
                 commit_hash = self.git.commit(
                     changed_in_repo,
                     f"APOS {spec.task_id}: {spec.display_title()}",
                 )
-                return RunSummary("PASS", spec.task_id, branch, attempts, committed=True, commit_hash=commit_hash)
+                return self._finish(
+                    recorder,
+                    RunSummary("PASS", spec.task_id, branch, attempts, committed=True, commit_hash=commit_hash),
+                )
 
             previous_error = summarize_failures(test_results)
-            attempts.append(AttemptResult(attempt_number, "FAILED", previous_error, test_results))
+            attempt = AttemptResult(attempt_number, "FAILED", previous_error, test_results)
+            attempts.append(attempt)
+            recorder.record_attempt(attempt)
 
-        return RunSummary("FAILED", spec.task_id, branch, attempts)
+        return self._finish(recorder, RunSummary("FAILED", spec.task_id, branch, attempts))
+
+    def _finish(self, recorder: RunRecorder, summary: RunSummary) -> RunSummary:
+        summary_with_log = RunSummary(
+            status=summary.status,
+            task_id=summary.task_id,
+            branch=summary.branch,
+            attempts=summary.attempts,
+            committed=summary.committed,
+            commit_hash=summary.commit_hash,
+            run_log=recorder.relative_path(),
+        )
+        recorder.record_summary(summary_with_log)
+        return summary_with_log

@@ -188,6 +188,7 @@ class RunSummary:
     attempts: list[AttemptResult]
     committed: bool = False
     commit_hash: str | None = None
+    run_log: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -197,5 +198,5 @@ class RunSummary:
             "attempts": [attempt.to_dict() for attempt in self.attempts],
             "committed": self.committed,
             "commit_hash": self.commit_hash,
+            "run_log": self.run_log,
         }
-
