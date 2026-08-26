@@ -30,7 +30,10 @@ diff --git a/app.py b/app.py
 +new
 ```"""
 
-        self.assertTrue(extract_protocol_output(output).startswith("diff --git a/app.py b/app.py"))
+        extracted = extract_protocol_output(output)
+
+        self.assertTrue(extracted.startswith("diff --git a/app.py b/app.py"))
+        self.assertNotIn("```", extracted)
 
     def test_extracts_permission_request_json(self):
         request = {
@@ -51,4 +54,3 @@ diff --git a/app.py b/app.py
 
 if __name__ == "__main__":
     unittest.main()
-

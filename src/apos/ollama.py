@@ -89,14 +89,6 @@ def extract_protocol_output(output: str) -> str:
     if not stripped:
         return ""
 
-    json_output = _extract_json(stripped)
-    if json_output:
-        return json_output
-
-    diff_output = _extract_diff(stripped)
-    if diff_output:
-        return diff_output
-
     fenced = _extract_fenced_block(stripped)
     if fenced:
         json_output = _extract_json(fenced)
@@ -105,6 +97,14 @@ def extract_protocol_output(output: str) -> str:
         diff_output = _extract_diff(fenced)
         if diff_output:
             return diff_output
+
+    json_output = _extract_json(stripped)
+    if json_output:
+        return json_output
+
+    diff_output = _extract_diff(stripped)
+    if diff_output:
+        return diff_output
     return ""
 
 

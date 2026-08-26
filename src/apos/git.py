@@ -70,8 +70,8 @@ class GitClient:
             self.run(["checkout", "-b", branch])
 
     def apply_patch(self, patch: str) -> None:
-        self.run(["apply", "--check", "-"], input_text=patch)
-        self.run(["apply", "-"], input_text=patch)
+        self.run(["apply", "--recount", "--check", "-"], input_text=patch)
+        self.run(["apply", "--recount", "-"], input_text=patch)
 
     def diff(self) -> str:
         return self.run(["diff"], check=False).stdout
