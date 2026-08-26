@@ -11,5 +11,6 @@
 - Done: add benchmark result inspection/list commands.
 - Done: add model/coder profile metadata to benchmark results.
 - Done: add a minimal competitive comparison report across benchmark results.
-- Next: add failure reason classification to reports and benchmark results.
+- Done: add failure reason classification to reports and benchmark results.
+- Next: add permission request approve/deny workflow.
 - Later: add Cloud Controller TaskSpec generation.

@@ -98,7 +98,8 @@ apos report .apos/runs/task-001/20260826T010000Z-abc12345
 
 Use `--json` with these commands when another tool needs structured run data.
 The report command produces a compact quality summary with status, attempts,
-test counts, rollback counts, commit information, and a deterministic score.
+test counts, rollback counts, failure classification, commit information, and a
+deterministic score.
 
 ## Benchmark suites
 
@@ -111,7 +112,8 @@ apos benchmark run examples/benchmarks/fast-track-suite.json
 A benchmark suite groups TaskSpec files with comparison metadata such as
 category, difficulty, weight, tags, and metrics.
 Benchmark run results are written under `.apos/benchmarks/<suite-id>/<run-id>/`
-and include each task summary, quality report, and runner profile metadata.
+and include each task summary, quality report, failure summary, and runner
+profile metadata.
 
 ```bash
 apos benchmark results list

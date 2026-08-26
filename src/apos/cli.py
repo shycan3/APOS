@@ -516,6 +516,7 @@ def _print_quality_report(report: dict[str, object]) -> None:
     tests = report.get("tests") if isinstance(report.get("tests"), dict) else {}
     responses = report.get("responses") if isinstance(report.get("responses"), dict) else {}
     rollbacks = report.get("rollbacks") if isinstance(report.get("rollbacks"), dict) else {}
+    failure = report.get("failure") if isinstance(report.get("failure"), dict) else {}
     notes = quality.get("notes") if isinstance(quality.get("notes"), list) else []
 
     print(f"Quality report: {report.get('run_log')}")
@@ -527,6 +528,7 @@ def _print_quality_report(report: dict[str, object]) -> None:
     print(f"Tests: {tests.get('passed')}/{tests.get('total')} passed, {tests.get('failed')} failed")
     print(f"Responses: patch={responses.get('patch')}, permission_requests={responses.get('permission_requests')}")
     print(f"Rollbacks: passed={rollbacks.get('passed')}, failed={rollbacks.get('failed')}")
+    print(f"Failure: primary={failure.get('primary') or 'none'}, recovered={failure.get('recovered') or False}")
     if report.get("commit_hash"):
         print(f"Commit: {report.get('commit_hash')}")
     for note in notes:
@@ -570,6 +572,10 @@ def _print_benchmark_result(result: dict[str, object]) -> None:
         print(f"Runner: APOS {runner_profile.get('apos_version')}  model={ollama.get('model') or '-'}")
     print(f"Tasks: {summary.get('passed_tasks')}/{summary.get('total_tasks')} passed")
     print(f"Average score: {summary.get('average_quality_score')}")
+    primary_failures = summary.get("primary_failures") if isinstance(summary.get("primary_failures"), dict) else {}
+    if primary_failures:
+        formatted = ", ".join(f"{key}={value}" for key, value in primary_failures.items())
+        print(f"Primary failures: {formatted}")
     print(f"Result file: {result.get('result_path')}")
     for item in tasks:
         if not isinstance(item, dict):

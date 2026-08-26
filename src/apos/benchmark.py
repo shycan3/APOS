@@ -323,16 +323,34 @@ def _benchmark_summary(tasks: list[dict[str, object]], total_tasks: int) -> dict
     passed = sum(1 for task in tasks if task.get("status") == "PASS")
     failed = completed - passed
     scores: list[int] = []
+    primary_failures: dict[str, int] = {}
+    failure_reasons: dict[str, int] = {}
     for task in tasks:
         report = task.get("report")
         if not isinstance(report, dict):
             continue
         quality = report.get("quality")
         if not isinstance(quality, dict):
-            continue
+            quality = {}
         score = quality.get("score")
         if isinstance(score, int):
             scores.append(score)
+        failure = report.get("failure")
+        if not isinstance(failure, dict):
+            continue
+        primary = failure.get("primary")
+        if isinstance(primary, str) and primary != "none":
+            primary_failures[primary] = primary_failures.get(primary, 0) + 1
+        reasons = failure.get("reasons")
+        if not isinstance(reasons, list):
+            continue
+        for reason in reasons:
+            if not isinstance(reason, dict):
+                continue
+            code = reason.get("code")
+            count = reason.get("count")
+            if isinstance(code, str) and isinstance(count, int):
+                failure_reasons[code] = failure_reasons.get(code, 0) + count
     average_score = round(sum(scores) / len(scores), 2) if scores else None
     return {
         "total_tasks": total_tasks,
@@ -340,6 +358,8 @@ def _benchmark_summary(tasks: list[dict[str, object]], total_tasks: int) -> dict
         "passed_tasks": passed,
         "failed_tasks": failed,
         "average_quality_score": average_score,
+        "primary_failures": dict(sorted(primary_failures.items())),
+        "failure_reasons": dict(sorted(failure_reasons.items())),
     }
 
 

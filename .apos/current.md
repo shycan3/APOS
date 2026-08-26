@@ -7,12 +7,13 @@
 - The core runtime accepts a human-written TaskSpec, requests a unified diff from a configured Local Coder command, validates changed paths against `allowed_files`, applies the patch, runs test commands, retries on failure, and can commit successful changes.
 - Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`, including prompts, coder responses, test results, and summary JSON.
 - The CLI can list and inspect stored run logs with `apos runs list` and `apos runs show`.
-- The CLI can generate compact quality reports from run logs with `apos report`.
+- The CLI can generate compact quality reports from run logs with `apos report`, including primary failure classification and recovered failure reasons.
 - Benchmark suite metadata can group TaskSpec files for comparison using `apos benchmark validate/show/run`.
 - Benchmark run results are written under `.apos/benchmarks/<suite-id>/<run-id>/`.
 - Benchmark run results can be listed and inspected with `apos benchmark results list/show`.
 - Benchmark results include runner profile metadata such as APOS version, coder command, Ollama model, binary, host, and run options.
 - Benchmark results can be compared with `apos benchmark compare`, ranked by quality score, passed task count, and total duration.
+- Benchmark summaries aggregate primary failure classes and detailed failure reason counts.
 - Failed patches that apply but do not pass verification are reverse-applied before the next retry.
 - Ollama 0.32.15 is installed locally and `qwen2.5-coder:7b` is available as the configured Local Coder model.
 - `.apos/config.json` stores Ollama model, binary path, and HTTP host metadata for reuse by planner-style commands.

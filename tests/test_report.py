@@ -37,6 +37,8 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(report["quality"]["verdict"], "ready")
         self.assertEqual(report["quality"]["score"], 100)
         self.assertEqual(report["tests"]["passed"], 1)
+        self.assertEqual(report["failure"]["primary"], "none")
+        self.assertFalse(report["failure"]["recovered"])
 
     def test_reports_retry_penalty_and_rollback(self):
         report = build_quality_report(
@@ -70,6 +72,40 @@ class QualityReportTests(unittest.TestCase):
         self.assertEqual(report["quality"]["verdict"], "usable")
         self.assertEqual(report["quality"]["score"], 70)
         self.assertEqual(report["rollbacks"]["passed"], 1)
+        self.assertEqual(report["failure"]["primary"], "recovered")
+        self.assertTrue(report["failure"]["recovered"])
+        self.assertEqual(report["failure"]["reasons"][0]["code"], "verification_failed")
+
+    def test_classifies_permission_blocked_runs(self):
+        report = build_quality_report(
+            {
+                "path": ".apos/runs/task-permission/run-1",
+                "run": {"task_id": "TASK-PERMISSION", "title": "Permission", "branch": "apos/task-permission"},
+                "task": {"task_id": "TASK-PERMISSION"},
+                "summary": {
+                    "status": "NEEDS_PERMISSION",
+                    "task_id": "TASK-PERMISSION",
+                    "branch": "apos/task-permission",
+                    "attempts": [{"attempt": 1, "status": "NEEDS_PERMISSION"}],
+                    "committed": False,
+                },
+                "attempts": [
+                    {
+                        "result": {
+                            "attempt": 1,
+                            "status": "NEEDS_PERMISSION",
+                            "message": "Local Coder requested permission: read src/app/config.py",
+                        },
+                        "response": {"type": "request_permission"},
+                        "tests": [],
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(report["quality"]["verdict"], "blocked")
+        self.assertEqual(report["failure"]["primary"], "permission_required")
+        self.assertEqual(report["failure"]["reasons"][0]["code"], "permission_required")
 
     def test_cli_generates_report_for_run_log(self):
         with tempfile.TemporaryDirectory() as tmp:

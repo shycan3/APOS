@@ -23,6 +23,8 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
     tests_failed = 0
     rollbacks_passed = 0
     rollbacks_failed = 0
+    failure_counts: dict[str, int] = {}
+    failure_examples: dict[str, str] = {}
 
     for item in attempts:
         attempt = _dict(item)
@@ -33,6 +35,7 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
 
         status = str(result.get("status") or "UNKNOWN")
         attempt_statuses.append(status)
+        message = str(result.get("message") or "")
 
         response_type = response.get("type")
         if response_type == "patch":
@@ -54,7 +57,13 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
         elif rollback_status == "FAILED":
             rollbacks_failed += 1
 
+        for code in _attempt_failure_codes(status, response_type, message, tests, rollback_status):
+            failure_counts[code] = failure_counts.get(code, 0) + 1
+            if message and code not in failure_examples:
+                failure_examples[code] = message
+
     status = str(summary.get("status") or "UNKNOWN")
+    failure = _failure_summary(status, failure_counts, failure_examples)
     score = _score(
         status=status,
         attempts=len(attempts),
@@ -87,6 +96,7 @@ def build_quality_report(detail: dict[str, object]) -> dict[str, object]:
             "passed": rollbacks_passed,
             "failed": rollbacks_failed,
         },
+        "failure": failure,
         "quality": {
             "score": score,
             "verdict": _verdict(status, score),
@@ -111,6 +121,80 @@ def _score(
     if status == "PASS" and not committed:
         score -= 5
     return max(0, min(100, score))
+
+
+def _attempt_failure_codes(
+    status: str,
+    response_type: object,
+    message: str,
+    tests: list[object],
+    rollback_status: object,
+) -> list[str]:
+    if status == "PASS":
+        return []
+
+    codes: list[str] = []
+    normalized_message = message.lower()
+    failed_tests = sum(1 for test in tests if not _test_passed(_dict(test)))
+
+    if response_type == "request_permission" or status == "NEEDS_PERMISSION":
+        codes.append("permission_required")
+    if "unauthorized write path" in normalized_message:
+        codes.append("unauthorized_write")
+    if "did not contain any changed file paths" in normalized_message:
+        codes.append("empty_patch")
+    if "git apply" in normalized_message and "failed" in normalized_message:
+        codes.append("patch_apply_failed")
+    if response_type not in ("patch", "request_permission"):
+        codes.append("patch_generation_failed")
+    if failed_tests:
+        codes.append("verification_failed")
+    if rollback_status == "FAILED" or "rollback failed" in normalized_message:
+        codes.append("rollback_failed")
+    if not codes:
+        codes.append("unknown_failure")
+    return codes
+
+
+def _test_passed(test: dict[str, object]) -> bool:
+    return test.get("status") == "PASS" and test.get("exit_code") == 0
+
+
+def _failure_summary(status: str, failure_counts: dict[str, int], failure_examples: dict[str, str]) -> dict[str, object]:
+    primary = _primary_failure(status, failure_counts)
+    return {
+        "primary": primary,
+        "recovered": status == "PASS" and bool(failure_counts),
+        "reasons": [
+            {
+                "code": code,
+                "count": count,
+                "example": failure_examples.get(code, ""),
+            }
+            for code, count in sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
+    }
+
+
+def _primary_failure(status: str, failure_counts: dict[str, int]) -> str:
+    if not failure_counts:
+        return "none"
+    if status == "PASS":
+        return "recovered"
+    precedence = [
+        "rollback_failed",
+        "permission_required",
+        "unauthorized_write",
+        "patch_apply_failed",
+        "empty_patch",
+        "verification_failed",
+        "patch_generation_failed",
+        "unknown_failure",
+    ]
+    for code in precedence:
+        if failure_counts.get(code, 0) > 0:
+            return code
+    return "unknown_failure"
 
 
 def _verdict(status: str, score: int) -> str:
