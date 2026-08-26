@@ -60,8 +60,8 @@ class RunLogTests(unittest.TestCase):
             self.assertIn("abc1234", list_output.stdout)
 
             show_output = self._run(root, [sys.executable, "-m", "apos", "runs", "show", entries[0].relative_path])
-            self.assertIn("Run log:", show_output.stdout)
-            self.assertIn("Attempt 1: PASS", show_output.stdout)
+            self.assertIn("실행 기록:", show_output.stdout)
+            self.assertIn("시도 1: 통과(PASS)", show_output.stdout)
 
     @staticmethod
     def _write_json(path: Path, data: object) -> None:
@@ -69,7 +69,7 @@ class RunLogTests(unittest.TestCase):
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True, encoding="utf-8")
         if completed.returncode != 0:
             raise AssertionError(completed.stderr or completed.stdout)
         return completed

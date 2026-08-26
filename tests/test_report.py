@@ -161,8 +161,8 @@ class QualityReportTests(unittest.TestCase):
             self.assertEqual(report["quality"]["verdict"], "ready")
 
             output = self._run(root, [sys.executable, "-m", "apos", "report", ".apos/runs/task-001/20260826T010000Z-abc12345"])
-            self.assertIn("Quality report:", output.stdout)
-            self.assertIn("Verdict: ready", output.stdout)
+            self.assertIn("품질 보고서:", output.stdout)
+            self.assertIn("판정: 준비 완료(ready)", output.stdout)
 
             json_output = self._run(
                 root,
@@ -176,7 +176,7 @@ class QualityReportTests(unittest.TestCase):
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True, encoding="utf-8")
         if completed.returncode != 0:
             raise AssertionError(completed.stderr or completed.stdout)
         return completed

@@ -59,7 +59,7 @@ class DraftTests(unittest.TestCase):
                 ],
             )
 
-            self.assertIn("TaskSpec written: tasks", output.stdout)
+            self.assertIn("TaskSpec 저장 완료: tasks", output.stdout)
             spec = TaskSpec.load(root / "tasks" / "task-001.json")
             self.assertEqual(spec.task_id, "TASK-001")
             self.assertEqual(spec.expected_behavior, ["Add greeting behavior"])
@@ -138,7 +138,7 @@ class DraftTests(unittest.TestCase):
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True, encoding="utf-8")
         if completed.returncode != 0:
             raise AssertionError(completed.stderr or completed.stdout)
         return completed

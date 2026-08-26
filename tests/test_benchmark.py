@@ -91,10 +91,10 @@ class BenchmarkSuiteTests(unittest.TestCase):
             self.assertEqual(suite.tasks[0].task_id, "TASK-001")
 
             validate_output = self._run(root, [sys.executable, "-m", "apos", "benchmark", "validate", "benchmarks/suite.json"])
-            self.assertIn("Benchmark suite valid: suite-1", validate_output.stdout)
+            self.assertIn("벤치마크 모음 검증 완료: suite-1", validate_output.stdout)
 
             show_output = self._run(root, [sys.executable, "-m", "apos", "benchmark", "show", "benchmarks/suite.json"])
-            self.assertIn("Benchmark suite: suite-1", show_output.stdout)
+            self.assertIn("벤치마크 모음: suite-1", show_output.stdout)
             self.assertIn("TASK-001", show_output.stdout)
 
             json_output = self._run(root, [sys.executable, "-m", "apos", "benchmark", "show", "benchmarks/suite.json", "--json"])
@@ -177,7 +177,7 @@ print('''diff --git a/app.py b/app.py
 
                 self.assertEqual(result["status"], "PASS", result)
                 self.assertEqual(result["summary"]["passed_tasks"], 1)
-                self.assertEqual(result["runner_profile"]["apos_version"], "1.1.0")
+                self.assertEqual(result["runner_profile"]["apos_version"], "1.1.1")
                 self.assertIn("fake_coder.py", result["runner_profile"]["coder_command"])
                 self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
                 self.assertTrue((root / str(result["result_path"])).exists())
@@ -194,14 +194,14 @@ print('''diff --git a/app.py b/app.py
 
                 list_output = self._run(root, [sys.executable, "-m", "apos", "benchmark", "results", "list"])
                 self.assertIn("suite-1", list_output.stdout)
-                self.assertIn("tasks=1/1", list_output.stdout)
+                self.assertIn("작업=1/1", list_output.stdout)
 
                 show_output = self._run(
                     root,
                     [sys.executable, "-m", "apos", "benchmark", "results", "show", str(result["result_path"])],
                 )
-                self.assertIn("Benchmark result:", show_output.stdout)
-                self.assertIn("Runner: APOS", show_output.stdout)
+                self.assertIn("벤치마크 결과:", show_output.stdout)
+                self.assertIn("실행 환경: APOS", show_output.stdout)
                 self.assertIn("TASK-001", show_output.stdout)
 
     def test_compares_benchmark_results_and_cli(self):
@@ -236,9 +236,9 @@ print('''diff --git a/app.py b/app.py
                     str(result_b.relative_to(root)),
                 ],
             )
-            self.assertIn("Benchmark comparison", output.stdout)
+            self.assertIn("벤치마크 비교", output.stdout)
             self.assertIn("#1  run-b", output.stdout)
-            self.assertIn("model=model-b", output.stdout)
+            self.assertIn("모델=model-b", output.stdout)
 
             json_output = self._run(
                 root,
@@ -296,7 +296,7 @@ print('''diff --git a/app.py b/app.py
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True, encoding="utf-8")
         if completed.returncode != 0:
             raise AssertionError(completed.stderr or completed.stdout)
         return completed
