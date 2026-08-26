@@ -31,10 +31,17 @@ python -m pip install -e .
 ## Initialize a project
 
 ```bash
+apos bootstrap
 apos init
 ```
 
 This creates `.apos/` project memory files and a default config.
+Use `bootstrap` when setting up a new project quickly; it can also configure
+Ollama in the same step:
+
+```bash
+apos bootstrap --ollama-model qwen2.5-coder:7b
+```
 
 ## Configure a Local Coder
 

@@ -9,6 +9,7 @@ This repository contains APOS, an AI Project Operating System prototype.
 APOS 0.1 focuses on one reliable task loop:
 
 - accept a human-written TaskSpec
+- bootstrap project memory and optional Ollama configuration
 - draft TaskSpec JSON from explicit CLI inputs
 - refine TaskSpec JSON with the configured Ollama model
 - constrain writable files

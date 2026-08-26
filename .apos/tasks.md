@@ -13,5 +13,6 @@
 - Done: add a minimal competitive comparison report across benchmark results.
 - Done: add failure reason classification to reports and benchmark results.
 - Done: add permission request approve/deny workflow.
-- Next: add install/bootstrap command polish.
+- Done: add install/bootstrap command polish.
+- Next: actually run the fast-track benchmark and capture a result.
 - Later: add Cloud Controller TaskSpec generation.

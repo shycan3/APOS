@@ -1,7 +1,8 @@
 # Current State
 
 - APOS 0.1 is implemented as a Python package in `src/apos`.
-- The CLI exposes `init`, `connect`, `connect-ollama`, `status`, `validate`, `task-template`, `draft`, `refine`, `run`, `runs`, `report`, and `benchmark`.
+- The CLI exposes `init`, `bootstrap`, `connect`, `connect-ollama`, `status`, `validate`, `task-template`, `draft`, `refine`, `run`, `runs`, `report`, and `benchmark`.
+- The `bootstrap` command initializes APOS memory and can configure an Ollama Local Coder in one step.
 - The `draft` command can generate a valid TaskSpec from explicit goal, allowed file, test, expectation, and constraint inputs.
 - The `refine` command can use the configured Ollama model to improve an existing TaskSpec while preserving file permissions and test commands.
 - The core runtime accepts a human-written TaskSpec, requests a unified diff from a configured Local Coder command, validates changed paths against `allowed_files`, applies the patch, runs test commands, retries on failure, and can commit successful changes.

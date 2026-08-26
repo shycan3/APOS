@@ -16,7 +16,7 @@ from .benchmark import (
     run_benchmark_suite,
     validate_benchmark_suite,
 )
-from .config import configured_ollama, ensure_project_memory, load_config, save_config
+from .config import configured_coder_command, configured_ollama, ensure_project_memory, load_config, save_config
 from .draft import DraftError, draft_task_spec, refine_task_spec_with_ollama, write_task_spec
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
@@ -46,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subcommands.add_parser("init", help="initialize APOS memory in the current Git project")
     init_parser.set_defaults(handler=cmd_init)
+
+    bootstrap_parser = subcommands.add_parser("bootstrap", help="initialize APOS and optionally configure Ollama")
+    bootstrap_parser.add_argument("--ollama-model", help="configure this Ollama model as the Local Coder")
+    bootstrap_parser.add_argument("--ollama-binary", default="ollama", help="Ollama executable path")
+    bootstrap_parser.add_argument("--ollama-host", default="http://127.0.0.1:11434", help="Ollama HTTP API host")
+    bootstrap_parser.set_defaults(handler=cmd_bootstrap)
 
     connect_parser = subcommands.add_parser("connect", help="configure a Local Coder command")
     connect_parser.add_argument("--coder-command", required=True, help="command that reads prompt stdin and prints a patch")
@@ -182,6 +188,27 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bootstrap(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    created = ensure_project_memory(root)
+    config = load_config(root)
+    if args.ollama_model:
+        config.setdefault("local_coder", {})["command"] = _ollama_coder_command(args.ollama_model, args.ollama_binary)
+        config.setdefault("ollama", {})["model"] = args.ollama_model
+        config.setdefault("ollama", {})["binary"] = args.ollama_binary
+        config.setdefault("ollama", {})["host"] = args.ollama_host
+        save_config(root, config)
+
+    print("APOS bootstrap complete.")
+    print(f"Project: {root}")
+    print(f"Memory files created: {len(created)}")
+    command = configured_coder_command(root)
+    print(f"Local Coder: {command or '<not configured>'}")
+    if not command:
+        print("Next: run apos connect-ollama --model <model> or apos connect --coder-command <command>")
+    return 0
+
+
 def cmd_connect(args: argparse.Namespace) -> int:
     root = GitClient(Path.cwd()).ensure_repo()
     ensure_project_memory(root)
@@ -193,17 +220,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
 
 
 def cmd_connect_ollama(args: argparse.Namespace) -> int:
-    command = subprocess.list2cmdline(
-        [
-            sys.executable,
-            "-m",
-            "apos.ollama",
-            "--model",
-            args.model,
-            "--ollama-binary",
-            args.ollama_binary,
-        ]
-    )
+    command = _ollama_coder_command(args.model, args.ollama_binary)
     root = GitClient(Path.cwd()).ensure_repo()
     ensure_project_memory(root)
     config = load_config(root)
@@ -214,6 +231,20 @@ def cmd_connect_ollama(args: argparse.Namespace) -> int:
     save_config(root, config)
     print(f"Ollama Local Coder configured: {args.model}")
     return 0
+
+
+def _ollama_coder_command(model: str, binary: str) -> str:
+    return subprocess.list2cmdline(
+        [
+            sys.executable,
+            "-m",
+            "apos.ollama",
+            "--model",
+            model,
+            "--ollama-binary",
+            binary,
+        ]
+    )
 
 
 def cmd_status(args: argparse.Namespace) -> int:
