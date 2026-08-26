@@ -17,6 +17,7 @@ APOS 0.1 focuses on one reliable task loop:
 - apply only authorized changes
 - continue through pre-approved permission requests
 - run verification commands
+- record preflight PASS results for tasks that already satisfy verification
 - retry on failure
 - roll back failed attempt patches before retrying
 - commit successful task results

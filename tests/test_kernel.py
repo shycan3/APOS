@@ -11,6 +11,54 @@ from apos.models import TaskSpec
 
 
 class KernelTests(unittest.TestCase):
+    def test_marks_task_passed_when_tests_already_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+
+            (root / "app.py").write_text("def greet(name):\n    return f\"Hello, {name}!\"\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                textwrap.dedent(
+                    """
+                    import unittest
+                    from app import greet
+
+
+                    class GreetingTests(unittest.TestCase):
+                        def test_greet(self):
+                            self.assertEqual(greet("APOS"), "Hello, APOS!")
+
+
+                    if __name__ == "__main__":
+                        unittest.main()
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            spec = TaskSpec.from_mapping(
+                {
+                    "task_id": "TASK-PREFLIGHT",
+                    "title": "Preflight",
+                    "goal": "Make greet return a friendly message.",
+                    "allowed_files": ["app.py"],
+                    "test_commands": [f"{sys.executable} -m unittest test_app.py"],
+                }
+            )
+
+            summary = Kernel(root).run_task(spec, RunOptions(no_commit=True, command_timeout_seconds=30))
+
+            self.assertEqual(summary.status, "PASS", summary.to_dict())
+            self.assertEqual(summary.attempts[0].attempt, 0)
+            self.assertEqual(summary.attempts[0].message, "tests already passed before coder changes")
+            run_log = root / str(summary.run_log)
+            self.assertTrue((run_log / "attempt-00" / "tests.json").exists())
+            self.assertFalse((run_log / "attempt-00" / "prompt.json").exists())
+
     def test_runs_patch_test_loop_without_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -279,6 +327,24 @@ class KernelTests(unittest.TestCase):
             self._run(root, ["git", "config", "user.email", "apos@example.test"])
             self._run(root, ["git", "config", "user.name", "APOS Test"])
             (root / "app.py").write_text("value = 1\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                textwrap.dedent(
+                    """
+                    import unittest
+                    import app
+
+
+                    class ValueTests(unittest.TestCase):
+                        def test_value(self):
+                            self.assertEqual(app.value, 2)
+
+
+                    if __name__ == "__main__":
+                        unittest.main()
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
             self._run(root, ["git", "add", "."])
             self._run(root, ["git", "commit", "-m", "initial"])
 
@@ -304,7 +370,7 @@ class KernelTests(unittest.TestCase):
                         "task_id": "TASK-DENIED",
                         "goal": "Try to change app.",
                         "allowed_files": ["app.py"],
-                        "test_commands": [f"{sys.executable} -m unittest discover"],
+                        "test_commands": [f"{sys.executable} -m unittest test_app.py"],
                     }
                 )
 

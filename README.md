@@ -103,6 +103,8 @@ Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`,
 including the TaskSpec, attempt prompts, coder responses, test results, and
 final summary. APOS automatically excludes `.apos/runs/` from Git tracking for
 the local repository.
+If the verification commands already pass before a coder is invoked, APOS
+records a preflight PASS run without requesting a patch.
 
 ## Inspect runs
 

@@ -14,5 +14,6 @@
 - Done: add failure reason classification to reports and benchmark results.
 - Done: add permission request approve/deny workflow.
 - Done: add install/bootstrap command polish.
+- Done: add preflight PASS handling for already-satisfied benchmark tasks.
 - Next: actually run the fast-track benchmark and capture a result.
 - Later: add Cloud Controller TaskSpec generation.

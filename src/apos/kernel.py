@@ -41,10 +41,6 @@ class Kernel:
         config = load_config(self.root)
         defaults = config.get("defaults", {})
 
-        command = options.coder_command or configured_coder_command(self.root)
-        if not command:
-            raise KernelError("no Local Coder command configured; run apos connect or set APOS_CODER_COMMAND")
-
         dirty = self.git.status_porcelain()
         if dirty and not options.allow_dirty:
             raise KernelError("working tree is not clean; use --allow-dirty to override")
@@ -60,11 +56,22 @@ class Kernel:
 
         timeout = int(options.command_timeout_seconds or defaults.get("command_timeout_seconds", 120))
         max_attempts = int(options.max_attempts or spec.max_attempts or defaults.get("max_attempts", 3))
+        preflight_results = run_commands(spec.test_commands, cwd=self.root, timeout_seconds=timeout)
+        if all(result.passed for result in preflight_results):
+            recorder.record_tests(0, preflight_results)
+            attempt = AttemptResult(0, "PASS", "tests already passed before coder changes", preflight_results)
+            recorder.record_attempt(attempt)
+            return self._finish(recorder, RunSummary("PASS", spec.task_id, branch, [attempt], committed=False))
+
+        command = options.coder_command or configured_coder_command(self.root)
+        if not command:
+            raise KernelError("no Local Coder command configured; run apos connect or set APOS_CODER_COMMAND")
+
         coder = CommandPatchCoder(command=command, timeout_seconds=timeout)
         permissions = PermissionManager(PermissionSpec.from_task(spec))
 
         attempts: list[AttemptResult] = []
-        previous_error: str | None = None
+        previous_error: str | None = summarize_failures(preflight_results)
 
         for attempt_number in range(1, max_attempts + 1):
             prompt = build_coder_prompt(self.root, spec, attempt_number, previous_error)

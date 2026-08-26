@@ -7,6 +7,7 @@
 - The `refine` command can use the configured Ollama model to improve an existing TaskSpec while preserving file permissions and test commands.
 - The core runtime accepts a human-written TaskSpec, requests a unified diff from a configured Local Coder command, validates changed paths against `allowed_files`, applies the patch, runs test commands, retries on failure, and can commit successful changes.
 - The task loop can continue through pre-approved permission requests using `--approve-read`, `--approve-write`, and `--deny-permission` on `apos run` or `apos benchmark run`.
+- If a task's verification commands already pass before coder invocation, APOS records a preflight PASS run log without requesting a patch.
 - Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`, including prompts, coder responses, test results, and summary JSON.
 - The CLI can list and inspect stored run logs with `apos runs list` and `apos runs show`.
 - The CLI can generate compact quality reports from run logs with `apos report`, including primary failure classification and recovered failure reasons.
