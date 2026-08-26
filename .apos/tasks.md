@@ -31,5 +31,6 @@
 - Done: add trusted lineage, policy, version, immutable-control, test, and benchmark gates.
 - Done: bind Codex and human reviews to an exact candidate commit and report hash.
 - Done: prohibit automatic promotion and expose manual `PROMOTABLE` status only.
-- Next: use the 1.1 workflow for the first measured 1.2 proposal.
+- Done: complete the first governed evolution cycle and promote the Korean CUI as APOS 1.1.1 after benchmark, Codex, and human approval.
+- Next: use the 1.1 workflow for the next measured APOS 1.x proposal.
 - Later: add Cloud Controller TaskSpec generation.

@@ -1,6 +1,8 @@
 # Current State
 
-- APOS 1.1.0 is the governed self-evolution baseline for every APOS 1.x release.
+- APOS 1.1.1 is the current release; `v1.1.0` remains the governed self-evolution baseline for every APOS 1.x release.
+- Korean is the default language for human-facing CLI help, summaries, labels, and parser errors; command names, options, JSON keys, and stored protocol status values remain stable.
+- Windows CLI output is configured as UTF-8 so Korean text renders correctly in PowerShell.
 - The 1.0 TaskSpec, permission, Local Coder, retry, rollback, commit, run-log, report, and benchmark capabilities remain available.
 - The CLI adds `evolution` (alias `evolve`) with `validate`, `status`, `create`, `run`, `evaluate`, and `review` commands.
 - `.apos/evolution-policy.json` pins `v1.1.0`, the version ceiling, required tests, the fixed benchmark threshold, immutable controls, required reviewers, and disabled automatic promotion.

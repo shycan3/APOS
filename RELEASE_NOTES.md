@@ -1,12 +1,13 @@
 # APOS 1.1 Release Notes
 
-## APOS 1.1.1 Candidate
+## APOS 1.1.1
 
 - Korean is now the default language for human-facing CLI help and output.
 - Argparse usage headings and common parser errors are localized.
 - Windows console output is explicitly UTF-8 to prevent broken Korean text.
 - Stored JSON keys, protocol status codes, command names, and options remain unchanged.
 - Displayed status values include both Korean meaning and the original code.
+- The candidate passed all required tests, the fixed 3/3 benchmark, trusted replay, Codex review, and human approval before manual promotion.
 
 APOS 1.1 is the governed self-evolution baseline for all APOS releases before
 2.0. It preserves the 1.0 local development runtime and adds an isolated,
