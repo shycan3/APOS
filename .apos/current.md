@@ -1,30 +1,19 @@
 # Current State
 
-- APOS 1.0 is implemented as a Python package in `src/apos`.
-- The CLI exposes `init`, `bootstrap`, `connect`, `connect-ollama`, `status`, `validate`, `task-template`, `draft`, `refine`, `run`, `runs`, `report`, and `benchmark`.
-- The `bootstrap` command initializes APOS memory and can configure an Ollama Local Coder in one step.
-- The `draft` command can generate a valid TaskSpec from explicit goal, allowed file, test, expectation, and constraint inputs.
-- The `refine` command can use the configured Ollama model to improve an existing TaskSpec while preserving file permissions and test commands.
-- The core runtime accepts a human-written TaskSpec, requests a unified diff from a configured Local Coder command, validates changed paths against `allowed_files`, applies the patch, runs test commands, retries on failure, and can commit successful changes.
-- The task loop can continue through pre-approved permission requests using `--approve-read`, `--approve-write`, and `--deny-permission` on `apos run` or `apos benchmark run`.
-- Local Coder responses may be unified diffs, controlled JSON `file_replacement` objects, or JSON permission requests.
-- Controlled file replacements are validated against `allowed_files`, tested, rolled back on failure, and committed on success.
-- If a task's verification commands already pass before coder invocation, APOS records a preflight PASS run log without requesting a patch.
-- Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`, including prompts, coder responses, test results, and summary JSON.
-- The CLI can list and inspect stored run logs with `apos runs list` and `apos runs show`.
-- The CLI can generate compact quality reports from run logs with `apos report`, including primary failure classification and recovered failure reasons.
-- Benchmark suite metadata can group TaskSpec files for comparison using `apos benchmark validate/show/run`.
-- Benchmark run results are written under `.apos/benchmarks/<suite-id>/<run-id>/`.
-- Benchmark run results can be listed and inspected with `apos benchmark results list/show`.
-- Benchmark results include runner profile metadata such as APOS version, coder command, Ollama model, binary, host, and run options.
-- Benchmark results can be compared with `apos benchmark compare`, ranked by quality score, passed task count, and total duration.
-- Benchmark summaries aggregate primary failure classes and detailed failure reason counts.
-- The fast-track benchmark suite now contains 3 tasks: greeting, slug normalization, and active todo filtering.
-- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-1-0/20260826T181653Z-0b1a7959/result.json` (`PASS`, 3/3 tasks, average quality score 70.0, `--max-attempts 5`).
-- The latest expanded benchmark recovered from earlier malformed/corrupt diff failures by using the Ollama HTTP adapter and controlled file replacement support.
-- Benchmark runs use per-result task branches and return to the starting branch after each task so larger suites can compare tasks from a consistent baseline.
-- Failed patches that apply but do not pass verification are reverse-applied before the next retry.
-- Ollama 0.32.15 is installed locally and `qwen2.5-coder:7b` is available as the configured Local Coder model.
-- `.apos/config.json` stores Ollama model, binary path, and HTTP host metadata for reuse by planner-style commands.
-- The Ollama Local Coder adapter now uses the Ollama HTTP API first and falls back to the CLI runner if HTTP is unavailable.
-- Cloud Controller planning is not implemented in 1.0.
+- APOS 1.1.0 is the governed self-evolution baseline for every APOS 1.x release.
+- The 1.0 TaskSpec, permission, Local Coder, retry, rollback, commit, run-log, report, and benchmark capabilities remain available.
+- The CLI adds `evolution` (alias `evolve`) with `validate`, `status`, `create`, `run`, `evaluate`, and `review` commands.
+- `.apos/evolution-policy.json` pins `v1.1.0`, the version ceiling, required tests, the fixed benchmark threshold, immutable controls, required reviewers, and disabled automatic promotion.
+- Evolution proposals declare the parent release ref, exact target version, risk, writable and readable files, constraints, expected behavior, tests, and attempt budget.
+- Candidate creation verifies clean trusted state, baseline lineage, parent version ordering, branch uniqueness, and policy validity before creating a dedicated Git worktree.
+- Candidate development reuses the normal APOS kernel and commits only to the registered `apos/evolution/<candidate-id>` branch.
+- Trusted evaluation checks clean state, branch and commit lineage, the policy against the `v1.1.0` copy, cumulative immutable-file changes, consistent version sources, required tests, and the fixed benchmark.
+- Candidate benchmark JSON is cross-checked by independently replaying each reported result branch with the pinned TaskSpec test commands in temporary trusted worktrees.
+- Quick evaluation produces `INCOMPLETE` and cannot be reviewed.
+- Full passing evaluation produces machine-readable evidence and a Markdown review packet under `.apos/evolution/candidates/<candidate-id>/evaluations/`.
+- Codex and human review records are bound to the exact candidate commit and evaluation report SHA-256.
+- Both approvals produce `PROMOTABLE`; APOS cannot merge, tag, deploy, or promote the candidate.
+- The evolution lifecycle has been exercised end to end in temporary Git repositories, including candidate development and rejection of modified control files.
+- The control benchmark contains greeting, slug normalization, and active todo filtering tasks and requires 3/3 PASS with average quality score at least 70.0.
+- Ollama `qwen2.5-coder:7b` remains the configured Local Coder through the HTTP-first adapter.
+- Cloud Controller planning is not implemented in 1.1.

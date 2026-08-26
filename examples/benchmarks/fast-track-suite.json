@@ -1,8 +1,8 @@
 {
-  "suite_id": "apos-fast-track-1.0",
-  "title": "APOS Fast Track 1.0 Benchmark",
-  "description": "A small benchmark suite for comparing APOS task execution speed, reliability, and quality.",
-  "version": "1.0",
+  "suite_id": "apos-evolution-baseline-1.1",
+  "title": "APOS Evolution Baseline 1.1",
+  "description": "The immutable APOS 1.x control suite for comparing candidate reliability and quality against v1.1.0.",
+  "version": "1.1",
   "metrics": [
     "quality.score",
     "status",

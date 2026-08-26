@@ -18,6 +18,15 @@ from .benchmark import (
 )
 from .config import configured_coder_command, configured_ollama, ensure_project_memory, load_config, save_config
 from .draft import DraftError, draft_task_spec, refine_task_spec_with_ollama, write_task_spec
+from .evolution import (
+    EvolutionError,
+    create_candidate,
+    evaluate_candidate,
+    evolution_status,
+    record_review,
+    run_candidate,
+    validate_evolution,
+)
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
 from .models import SpecError, TaskSpec
@@ -33,13 +42,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return int(args.handler(args))
-    except (BenchmarkError, DraftError, GitError, KernelError, SpecError) as exc:
+    except (BenchmarkError, DraftError, EvolutionError, GitError, KernelError, SpecError) as exc:
         print(f"APOS error: {exc}", file=sys.stderr)
         return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="apos", description="APOS 1.0 local AI development runtime")
+    parser = argparse.ArgumentParser(prog="apos", description="APOS 1.1 governed AI development runtime")
     parser.add_argument("--version", action="version", version=f"apos {__version__}")
 
     subcommands = parser.add_subparsers(dest="command")
@@ -172,6 +181,56 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_results_show_parser.add_argument("result", help="benchmark result path or result directory")
     benchmark_results_show_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark result")
     benchmark_results_show_parser.set_defaults(handler=cmd_benchmark_results_show)
+
+    evolution_parser = subcommands.add_parser(
+        "evolution",
+        aliases=["evolve"],
+        help="create and govern isolated APOS evolution candidates",
+    )
+    evolution_subcommands = evolution_parser.add_subparsers(dest="evolution_command")
+
+    evolution_validate_parser = evolution_subcommands.add_parser("validate", help="validate the pinned 1.1 evolution policy")
+    evolution_validate_parser.add_argument("--json", action="store_true", help="print machine-readable validation evidence")
+    evolution_validate_parser.set_defaults(handler=cmd_evolution_validate)
+
+    evolution_status_parser = evolution_subcommands.add_parser("status", help="show baseline or candidate governance status")
+    evolution_status_parser.add_argument("candidate_id", nargs="?", help="optional candidate id")
+    evolution_status_parser.add_argument("--json", action="store_true", help="print machine-readable status")
+    evolution_status_parser.set_defaults(handler=cmd_evolution_status)
+
+    evolution_create_parser = evolution_subcommands.add_parser("create", help="create an isolated candidate worktree")
+    evolution_create_parser.add_argument("proposal", type=Path, help="evolution proposal JSON file")
+    evolution_create_parser.add_argument("--candidate-id", help="stable lowercase candidate id")
+    evolution_create_parser.add_argument("--base-ref", help="reviewed parent release ref; defaults to proposal or v1.1.0")
+    evolution_create_parser.add_argument("--json", action="store_true", help="print machine-readable candidate metadata")
+    evolution_create_parser.set_defaults(handler=cmd_evolution_create)
+
+    evolution_run_parser = evolution_subcommands.add_parser("run", help="let APOS develop one isolated candidate")
+    evolution_run_parser.add_argument("candidate_id")
+    evolution_run_parser.add_argument("--coder-command", help="override configured Local Coder command")
+    evolution_run_parser.add_argument("--max-attempts", type=int, help="override proposal retry budget")
+    evolution_run_parser.add_argument("--timeout", type=int, help="command timeout in seconds")
+    evolution_run_parser.add_argument("--no-commit", action="store_true", help="leave successful changes uncommitted")
+    evolution_run_parser.add_argument("--approve-read", action="append", default=[], help="pre-approve a requested read path")
+    evolution_run_parser.add_argument("--approve-write", action="append", default=[], help="pre-approve a requested write path")
+    evolution_run_parser.add_argument("--deny-permission", action="append", default=[], help="pre-deny a requested path")
+    evolution_run_parser.add_argument("--json", action="store_true", help="print machine-readable development result")
+    evolution_run_parser.set_defaults(handler=cmd_evolution_run)
+
+    evolution_evaluate_parser = evolution_subcommands.add_parser("evaluate", help="evaluate a candidate against trusted 1.1 gates")
+    evolution_evaluate_parser.add_argument("candidate_id")
+    evolution_evaluate_parser.add_argument("--quick", action="store_true", help="run structural and unit-test gates without the benchmark")
+    evolution_evaluate_parser.add_argument("--timeout", type=int, default=600, help="timeout for each verification command")
+    evolution_evaluate_parser.add_argument("--json", action="store_true", help="print machine-readable evaluation report")
+    evolution_evaluate_parser.set_defaults(handler=cmd_evolution_evaluate)
+
+    evolution_review_parser = evolution_subcommands.add_parser("review", help="record a commit-bound Codex or human review")
+    evolution_review_parser.add_argument("candidate_id")
+    evolution_review_parser.add_argument("--reviewer", required=True, choices=["codex", "human"])
+    evolution_review_parser.add_argument("--decision", required=True, choices=["approve", "reject"])
+    evolution_review_parser.add_argument("--note", required=True, help="review evidence or rejection reason")
+    evolution_review_parser.add_argument("--json", action="store_true", help="print machine-readable review record")
+    evolution_review_parser.set_defaults(handler=cmd_evolution_review)
 
     return parser
 
@@ -500,6 +559,100 @@ def cmd_benchmark_results_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_evolution_validate(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = validate_evolution(root)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    print("APOS evolution policy valid.")
+    print(f"Baseline: {result['baseline_ref']} ({result['baseline_version']})")
+    print(f"Commit: {result['baseline_commit']}")
+    print(f"Policy hash: {result['policy_hash']}")
+    print(f"Version ceiling: < {result['maximum_version_exclusive']}")
+    print(f"Required reviewers: {', '.join(result['required_reviewers'])}")
+    print("Automatic promotion: disabled")
+    return 0
+
+
+def cmd_evolution_status(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = evolution_status(root, args.candidate_id)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    _print_evolution_status(result)
+    return 0
+
+
+def cmd_evolution_create(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = create_candidate(root, args.proposal, args.candidate_id, args.base_ref)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    print(f"Evolution candidate created: {result['candidate_id']}")
+    print(f"Workspace: {result['workspace']}")
+    print(f"Branch: {result['branch']}")
+    print(f"Parent: {result['parent_ref']} ({result['parent_commit']})")
+    print(f"Target version: {result['target_version']}")
+    print("Next: run APOS development inside the isolated candidate with `apos evolution run`.")
+    return 0
+
+
+def cmd_evolution_run(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = run_candidate(
+        root,
+        args.candidate_id,
+        RunOptions(
+            coder_command=args.coder_command,
+            max_attempts=args.max_attempts,
+            no_commit=args.no_commit,
+            command_timeout_seconds=args.timeout,
+            approved_read=tuple(args.approve_read),
+            approved_write=tuple(args.approve_write),
+            denied_permissions=tuple(args.deny_permission),
+        ),
+    )
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        run = result.get("run") if isinstance(result.get("run"), dict) else {}
+        print(f"Evolution candidate: {args.candidate_id}")
+        print(f"Development status: {run.get('status')}")
+        print(f"Candidate branch: {run.get('branch')}")
+        print(f"Commit: {run.get('commit_hash') or 'skipped'}")
+        print(f"Run log: {run.get('run_log') or '-'}")
+    run = result.get("run") if isinstance(result.get("run"), dict) else {}
+    return 0 if run.get("status") == "PASS" else 2
+
+
+def cmd_evolution_evaluate(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = evaluate_candidate(root, args.candidate_id, quick=args.quick, timeout_seconds=args.timeout)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        _print_evolution_evaluation(result)
+    return 0 if result.get("status") in {"READY_FOR_REVIEW", "INCOMPLETE"} else 2
+
+
+def cmd_evolution_review(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    result = record_review(root, args.candidate_id, args.reviewer, args.decision, args.note)
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    review = result.get("review") if isinstance(result.get("review"), dict) else {}
+    promotion = result.get("promotion") if isinstance(result.get("promotion"), dict) else {}
+    print(f"Review recorded: {review.get('reviewer')} -> {review.get('decision')}")
+    print(f"Candidate commit: {review.get('candidate_commit')}")
+    print(f"Promotion status: {promotion.get('status')}")
+    print("Automatic promotion: disabled")
+    return 0
+
+
 def _print_summary(summary) -> None:
     print(f"Task: {summary.task_id}")
     print(f"Status: {summary.status}")
@@ -658,6 +811,46 @@ def _print_benchmark_comparison(comparison: dict[str, object]) -> None:
         )
         if item.get("result_path"):
             print(f"  {item.get('result_path')}")
+
+
+def _print_evolution_status(result: dict[str, object]) -> None:
+    baseline = result.get("baseline") if isinstance(result.get("baseline"), dict) else {}
+    current = result.get("current") if isinstance(result.get("current"), dict) else {}
+    governance = result.get("governance") if isinstance(result.get("governance"), dict) else {}
+    print(f"Evolution status: {result.get('status')}")
+    print(f"Baseline: {baseline.get('ref')}  version={baseline.get('version')}  commit={baseline.get('commit')}")
+    print(f"Current: {current.get('branch')}  version={current.get('version')}  commit={current.get('commit')}")
+    print(f"Policy hash: {result.get('policy_hash')}")
+    print(f"Required reviewers: {', '.join(str(item) for item in governance.get('required_reviewers', []))}")
+    print("Automatic promotion: disabled")
+    candidate = result.get("candidate") if isinstance(result.get("candidate"), dict) else None
+    if candidate:
+        promotion = result.get("promotion") if isinstance(result.get("promotion"), dict) else {}
+        print(f"Candidate: {candidate.get('candidate_id')}  status={candidate.get('status')}  target={candidate.get('target_version')}")
+        print(f"Promotion status: {promotion.get('status')}")
+        missing = promotion.get("missing_reviewers") if isinstance(promotion.get("missing_reviewers"), list) else []
+        if missing:
+            print(f"Missing reviews: {', '.join(str(item) for item in missing)}")
+        return
+    candidates = result.get("candidates") if isinstance(result.get("candidates"), list) else []
+    print(f"Candidates: {len(candidates)}")
+    for item in candidates:
+        if isinstance(item, dict):
+            print(f"  {item.get('candidate_id')}  {item.get('status')}  target={item.get('target_version')}")
+
+
+def _print_evolution_evaluation(result: dict[str, object]) -> None:
+    print(f"Evolution evaluation: {result.get('candidate_id')}")
+    print(f"Status: {result.get('status')}")
+    print(f"Commit: {result.get('candidate_commit')}")
+    print(f"Version: {result.get('candidate_version')}")
+    gates = result.get("gates") if isinstance(result.get("gates"), list) else []
+    for gate in gates:
+        if isinstance(gate, dict):
+            print(f"  {gate.get('status')}  {gate.get('name')}: {gate.get('detail')}")
+    print(f"Evidence: {result.get('report_path')}")
+    print(f"Review packet: {result.get('review_path')}")
+    print("Automatic promotion: disabled")
 
 
 if __name__ == "__main__":

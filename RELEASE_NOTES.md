@@ -1,29 +1,43 @@
-# APOS 1.0 Release Notes
+# APOS 1.1 Release Notes
 
-APOS 1.0 is the fast-track local release for competitive AI coding experiments.
+APOS 1.1 is the governed self-evolution baseline for all APOS releases before
+2.0. It preserves the 1.0 local development runtime and adds an isolated,
+measured, two-review candidate lifecycle.
 
-## Included
+## Added
 
-- TaskSpec validation, draft, and Ollama-assisted refinement
-- Local Coder orchestration with explicit file permissions
-- Unified diff, controlled file replacement, and permission request responses
-- Test execution, retries, rollback, and Git commits
-- Inspectable run logs and quality reports
-- Benchmark suites, result inspection, runner profiles, and result comparison
-- Pre-approved and pre-denied permission decisions
-- Project bootstrap and Ollama configuration
+- tracked APOS 1.x evolution policy pinned to `v1.1.0`
+- strict evolution proposal schema and version boundaries
+- isolated candidate creation with Git worktrees
+- candidate development through the existing APOS kernel
+- trusted lineage, clean-state, policy-hash, immutable-control, and version gates
+- required unit-test and fixed benchmark gates
+- trusted independent replay of every reported benchmark result branch
+- machine-readable evaluation reports and Markdown review packets
+- Codex and human review records bound to candidate commit and report hash
+- `PROMOTABLE` status with no automatic promotion implementation
+- `apos evolution` and `apos evolve` CLI command groups
+
+## Safety Boundary
+
+APOS may create, develop, evaluate, and prepare evidence for a candidate. APOS
+cannot merge, tag, deploy, or promote a candidate. Review records are local
+attestations; release authority remains with the user and external Git actions.
 
 ## Baseline
 
 ```text
-Command: apos benchmark run examples/benchmarks/fast-track-suite.json --keep-going --max-attempts 5
-Result: PASS, 3/3 tasks, average quality score 70.0
-Path: .apos/benchmarks/apos-fast-track-1-0/20260826T181653Z-0b1a7959/result.json
-Runtime: APOS 1.0.0 with qwen2.5-coder:7b through Ollama HTTP
+Release: v1.1.0
+Suite: apos-evolution-baseline-1.1
+Requirement: PASS, 3/3 tasks, average quality score >= 70.0
+Runtime: APOS 1.1.0 with qwen2.5-coder:7b through Ollama HTTP
 ```
+
+The final captured result path is recorded in `.apos/current.md` after release
+verification.
 
 ## Deferred
 
 - Cloud Controller planning
-- APOS self-evolution workflow
-- Automatic promotion review gates
+- authenticated multi-user review identities
+- automatic promotion, intentionally forbidden throughout APOS 1.x

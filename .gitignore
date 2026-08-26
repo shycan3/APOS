@@ -12,3 +12,4 @@ dist/
 venv/
 .apos/runs/
 .apos/benchmarks/
+.apos/evolution/

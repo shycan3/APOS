@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Core Python package for the APOS 1.0 runtime.
+Core Python package for the APOS 1.1 runtime.
 
 ## Structure
 
@@ -16,9 +16,11 @@ Core Python package for the APOS 1.0 runtime.
 - `executor.py`: verification command execution.
 - `config.py`: `.apos/` memory initialization and config loading.
 - `pathing.py`: project-relative path normalization and root escape checks.
+- `evolution.py`: pinned baseline, candidate worktree, evaluation, and review governance.
 
 ## Rules
 
 - Local Coder output is treated as data and must be validated before patch application.
 - A task succeeds only when verification commands pass.
-- Cloud Controller behavior is outside APOS 1.0.
+- Candidate evaluation runs from the trusted workspace and automatic promotion is forbidden.
+- Cloud Controller behavior is outside APOS 1.1.

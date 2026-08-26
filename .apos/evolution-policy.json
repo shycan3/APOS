@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "version": "1.1.0",
+    "ref": "v1.1.0",
+    "evidence": {
+      "suite_id": "apos-evolution-baseline-1.1",
+      "passed_tasks": 3,
+      "total_tasks": 3,
+      "minimum_quality_score": 70.0,
+      "source_release": "v1.1.0"
+    }
+  },
+  "candidates": {
+    "branch_prefix": "apos/evolution/",
+    "maximum_version_exclusive": "2.0.0"
+  },
+  "verification": {
+    "required_test_commands": [
+      "python -m unittest discover -s tests"
+    ],
+    "benchmark": {
+      "command": "python -m apos benchmark run examples/benchmarks/fast-track-suite.json --keep-going --max-attempts 5 --json",
+      "suite": "examples/benchmarks/fast-track-suite.json",
+      "trusted_replay": true,
+      "minimum_pass_rate": 1.0,
+      "minimum_quality_score": 70.0
+    }
+  },
+  "governance": {
+    "immutable_paths": [
+      ".apos/evolution-policy.json",
+      "examples/benchmarks/fast-track-suite.json",
+      "tasks/task-002-greeting.json",
+      "tasks/task-003-slugify.json",
+      "tasks/task-004-active-todos.json",
+      "sandbox/hello_app/test_greeting.py",
+      "sandbox/text_app/check_slug.py",
+      "sandbox/todo_app/check_todos.py"
+    ],
+    "required_reviewers": [
+      "codex",
+      "human"
+    ],
+    "auto_promotion": false
+  }
+}

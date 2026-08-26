@@ -177,7 +177,7 @@ print('''diff --git a/app.py b/app.py
 
                 self.assertEqual(result["status"], "PASS", result)
                 self.assertEqual(result["summary"]["passed_tasks"], 1)
-                self.assertEqual(result["runner_profile"]["apos_version"], "1.0.0")
+                self.assertEqual(result["runner_profile"]["apos_version"], "1.1.0")
                 self.assertIn("fake_coder.py", result["runner_profile"]["coder_command"])
                 self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
                 self.assertTrue((root / str(result["result_path"])).exists())

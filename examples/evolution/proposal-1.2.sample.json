@@ -1,0 +1,31 @@
+{
+  "proposal_id": "EVOL-001",
+  "title": "Improve APOS planning reliability",
+  "goal": "Improve one measured APOS planning or execution weakness without weakening the 1.1 safety contract.",
+  "target_version": "1.2.0",
+  "base_ref": "v1.1.0",
+  "risk": "medium",
+  "allowed_files": [
+    "pyproject.toml",
+    "src/apos/__init__.py",
+    "src/apos/draft.py",
+    "tests/test_draft.py"
+  ],
+  "read_only_files": [
+    "src/apos/models.py",
+    "src/apos/kernel.py"
+  ],
+  "constraints": [
+    "Keep existing public CLI behavior backward compatible.",
+    "Add focused regression tests for every behavior change."
+  ],
+  "expected_behavior": [
+    "The selected planning weakness has an observable regression test.",
+    "All APOS unit tests pass."
+  ],
+  "test_commands": [
+    "python -m unittest tests.test_draft",
+    "python -m unittest discover -s tests"
+  ],
+  "max_attempts": 5
+}

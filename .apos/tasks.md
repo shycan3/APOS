@@ -24,5 +24,12 @@
 - Done: rerun the expanded fast-track benchmark after file replacement support.
 - Done: promote APOS runtime metadata to 1.0.0.
 - Done: capture APOS Fast Track 1.0 benchmark result.
-- Next: prepare APOS self-evolution design for 1.1.
+- Done: define the APOS 1.1 self-evolution authority model and invariants.
+- Done: add strict evolution policy and proposal schemas.
+- Done: create isolated candidate worktrees from reviewed release refs.
+- Done: run APOS development inside candidate worktrees.
+- Done: add trusted lineage, policy, version, immutable-control, test, and benchmark gates.
+- Done: bind Codex and human reviews to an exact candidate commit and report hash.
+- Done: prohibit automatic promotion and expose manual `PROMOTABLE` status only.
+- Next: use the 1.1 workflow for the first measured 1.2 proposal.
 - Later: add Cloud Controller TaskSpec generation.

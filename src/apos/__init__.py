@@ -1,3 +1,3 @@
-"""APOS 1.0 local orchestration runtime."""
+"""APOS 1.1 governed orchestration and self-evolution runtime."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

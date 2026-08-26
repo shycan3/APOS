@@ -6,7 +6,7 @@ This repository contains APOS, an AI Project Operating System prototype.
 
 ## Current Scope
 
-APOS 1.0 focuses on one reliable task loop:
+APOS 1.1 preserves the reliable task loop and adds a governed evolution loop:
 
 - accept a human-written TaskSpec
 - bootstrap project memory and optional Ollama configuration
@@ -30,10 +30,17 @@ APOS 1.0 focuses on one reliable task loop:
 - list and inspect benchmark results with `apos benchmark results`
 - record runner profile metadata in benchmark results
 - compare benchmark results with `apos benchmark compare`
+- pin `v1.1.0` as the APOS 1.x governance baseline
+- create evolution candidates in isolated Git worktrees
+- develop candidates through the normal permission and verification kernel
+- evaluate candidate lineage, versions, immutable controls, tests, and benchmark quality
+- bind Codex and human review records to an exact commit and report hash
+- prohibit automatic merge, tag, deployment, or promotion
 
 ## Rules
 
-- Keep the Cloud Controller out of 1.0.
+- Keep the Cloud Controller out of 1.1.
 - Prefer patch-based coder output over direct file mutation.
 - Treat test/build execution as the success signal.
 - Keep project memory as current state, not an append-only reasoning log.
+- Treat `SELF_EVOLUTION.md` and `.apos/evolution-policy.json` as the APOS 1.x evolution contract.

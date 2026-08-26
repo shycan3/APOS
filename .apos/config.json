@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "local_coder": {
     "command": "C:\\Users\\DH\\AppData\\Local\\Programs\\Python\\Python311\\python.exe -m apos.ollama --model qwen2.5-coder:7b --ollama-binary C:\\Users\\DH\\AppData\\Local\\Programs\\Ollama\\ollama.exe --ollama-host http://127.0.0.1:11434"
   },

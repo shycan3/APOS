@@ -4,9 +4,10 @@ APOS is a local orchestration runtime for letting AI coding agents work inside a
 project with explicit task contracts, restricted write scope, verification, retry,
 Git history, and living documentation.
 
-## APOS 1.0
+## APOS 1.1
 
-APOS 1.0 is a fast-track local runtime for competitive AI coding experiments:
+APOS 1.1 combines the proven 1.0 task runtime with a governed self-evolution
+loop for every release before 2.0:
 
 ```text
 TaskSpec
@@ -18,7 +19,19 @@ TaskSpec
 -> run log, quality report, benchmark result
 ```
 
-APOS 1.0 does not include a Cloud Controller yet. A human, draft command, or
+APOS 1.1 adds a second lifecycle:
+
+```text
+versioned proposal
+-> isolated candidate worktree
+-> APOS development loop
+-> trusted tests and fixed benchmark
+-> commit-bound Codex review
+-> commit-bound human review
+-> PROMOTABLE (manual promotion only)
+```
+
+APOS 1.1 does not include a Cloud Controller yet. A human, draft command, or
 refine command prepares the TaskSpec, and APOS runs the implementation loop
 against a local coder command.
 If a patch applies but verification fails, APOS rolls that patch back before the
@@ -47,7 +60,7 @@ apos bootstrap --ollama-model qwen2.5-coder:7b
 
 ## Configure a Local Coder
 
-APOS 1.0 expects a local coder command that reads a prompt from stdin and writes
+APOS 1.1 expects a local coder command that reads a prompt from stdin and writes
 either:
 
 - a unified diff patch to stdout
@@ -205,19 +218,47 @@ JSON permission request:
 ```
 
 Permission escalation is supported through pre-approved or pre-denied run
-options in APOS 1.0.
+options in APOS 1.1.
 
-## Fast-track 1.0 benchmark
+## Governed self-evolution
 
-The current local baseline is:
+The complete safety contract and lifecycle are documented in
+`SELF_EVOLUTION.md`. Start by validating the immutable 1.1 baseline:
+
+```bash
+apos evolution validate
+apos evolution status
+```
+
+Create and develop a candidate from a bounded proposal:
+
+```bash
+apos evolution create examples/evolution/proposal-1.2.sample.json --candidate-id planning-1-2
+apos evolution run planning-1-2
+apos evolution evaluate planning-1-2
+```
+
+Only a full passing evaluation can receive reviews. Both reviews are bound to
+the evaluated commit and report hash:
+
+```bash
+apos evolution review planning-1-2 --reviewer codex --decision approve --note "Reviewed diff and evidence."
+apos evolution review planning-1-2 --reviewer human --decision approve --note "Approved for manual promotion."
+```
+
+APOS can report `PROMOTABLE`, but it cannot merge, tag, deploy, or promote
+itself. Those actions remain under external user control.
+
+## Evolution baseline 1.1
+
+The fixed APOS 1.x control command is:
 
 ```bash
 apos benchmark run examples/benchmarks/fast-track-suite.json --keep-going --max-attempts 5
 ```
 
-Latest captured result:
+Required threshold:
 
 ```text
-.apos/benchmarks/apos-fast-track-1-0/20260826T181653Z-0b1a7959/result.json
-PASS, 3/3 tasks, average quality score 70.0
+PASS, 3/3 tasks, average quality score >= 70.0
 ```
