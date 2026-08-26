@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
+from urllib import error, request
 
 
 SYSTEM_PROMPT = """You are APOS Local Coder.
@@ -67,6 +68,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_ollama(model: str, apos_prompt: str, ollama_binary: str, timeout_seconds: int) -> str:
     prompt = build_model_prompt(apos_prompt)
+    return run_ollama_prompt(model=model, prompt=prompt, ollama_binary=ollama_binary, timeout_seconds=timeout_seconds)
+
+
+def run_ollama_prompt(model: str, prompt: str, ollama_binary: str, timeout_seconds: int) -> str:
     completed = subprocess.run(
         [ollama_binary, "run", model],
         input=prompt,
@@ -80,6 +85,43 @@ def run_ollama(model: str, apos_prompt: str, ollama_binary: str, timeout_seconds
         detail = completed.stderr.strip() or completed.stdout.strip()
         raise RuntimeError(f"ollama run failed: {detail}")
     return completed.stdout
+
+
+def run_ollama_generate(
+    model: str,
+    prompt: str,
+    ollama_host: str,
+    timeout_seconds: int,
+    json_format: bool = False,
+) -> str:
+    payload: dict[str, object] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+    }
+    if json_format:
+        payload["format"] = "json"
+    data = json.dumps(payload).encode("utf-8")
+    url = ollama_host.rstrip("/") + "/api/generate"
+    http_request = request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with request.urlopen(http_request, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except error.URLError as exc:
+        raise RuntimeError(f"ollama HTTP generate failed: {exc}") from exc
+    try:
+        result = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"ollama HTTP generate returned invalid JSON: {exc}") from exc
+    generated = result.get("response")
+    if not isinstance(generated, str):
+        raise RuntimeError("ollama HTTP generate response did not include text")
+    return generated
 
 
 def build_model_prompt(apos_prompt: str) -> str:

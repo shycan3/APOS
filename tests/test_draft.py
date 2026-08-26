@@ -4,8 +4,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from apos.draft import draft_task_spec, next_task_id, title_from_goal
+from apos.draft import DraftError, draft_task_spec, extract_task_spec_json, next_task_id, refine_task_spec_with_ollama, title_from_goal
 from apos.models import TaskSpec
 
 
@@ -84,6 +85,56 @@ class DraftTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(json.loads(json_output.stdout)["path"], "tasks/task-002.json")
+
+    def test_extracts_fenced_task_spec_json(self):
+        output = """```json
+{
+  "task_id": "TASK-001",
+  "goal": "Add behavior",
+  "allowed_files": ["app.py"],
+  "test_commands": ["python -m unittest"]
+}
+```"""
+
+        self.assertEqual(extract_task_spec_json(output)["task_id"], "TASK-001")
+
+    def test_refines_task_spec_with_ollama(self):
+        spec = TaskSpec.from_mapping(
+            {
+                "task_id": "TASK-001",
+                "goal": "Add behavior",
+                "allowed_files": ["app.py"],
+                "test_commands": ["python -m unittest"],
+                "max_attempts": 3,
+            }
+        )
+        refined_json = {
+            **spec.to_dict(),
+            "title": "Add behavior",
+            "constraints": ["Keep the public API stable."],
+            "expected_behavior": ["The behavior is observable through tests."],
+        }
+
+        with patch("apos.draft.run_ollama_prompt", return_value=json.dumps(refined_json)):
+            refined = refine_task_spec_with_ollama(spec, model="test-model", ollama_binary="ollama", timeout_seconds=10)
+
+        self.assertEqual(refined.task_id, "TASK-001")
+        self.assertEqual(refined.constraints, ["Keep the public API stable."])
+
+    def test_rejects_refinement_that_changes_preserved_fields(self):
+        spec = TaskSpec.from_mapping(
+            {
+                "task_id": "TASK-001",
+                "goal": "Add behavior",
+                "allowed_files": ["app.py"],
+                "test_commands": ["python -m unittest"],
+            }
+        )
+        changed = {**spec.to_dict(), "allowed_files": ["other.py"]}
+
+        with patch("apos.draft.run_ollama_prompt", return_value=json.dumps(changed)):
+            with self.assertRaises(DraftError):
+                refine_task_spec_with_ollama(spec, model="test-model", ollama_binary="ollama", timeout_seconds=10)
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:

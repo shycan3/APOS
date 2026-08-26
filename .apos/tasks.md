@@ -7,5 +7,6 @@
 - Done: create benchmark task suite metadata.
 - Done: run a benchmark suite and collect per-task reports.
 - Done: add TaskSpec draft/generation support.
-- Next: add AI-assisted TaskSpec refinement using the configured Local Coder model.
+- Done: add AI-assisted TaskSpec refinement using the configured Ollama model.
+- Next: add benchmark result inspection/list commands.
 - Later: add Cloud Controller TaskSpec generation.

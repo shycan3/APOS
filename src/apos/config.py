@@ -9,6 +9,7 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "version": "0.1",
     "local_coder": {"command": None},
+    "ollama": {"model": None, "binary": "ollama", "host": "http://127.0.0.1:11434"},
     "defaults": {
         "branch_prefix": "apos/task-",
         "max_attempts": 3,
@@ -95,3 +96,13 @@ def configured_coder_command(root: Path) -> str | None:
     command = config.get("local_coder", {}).get("command")
     return command if isinstance(command, str) and command.strip() else None
 
+
+def configured_ollama(root: Path) -> tuple[str | None, str, str]:
+    config = load_config(root)
+    ollama = config.get("ollama", {})
+    if not isinstance(ollama, dict):
+        return None, "ollama", "http://127.0.0.1:11434"
+    model = ollama.get("model")
+    binary = ollama.get("binary") or "ollama"
+    host = ollama.get("host") or "http://127.0.0.1:11434"
+    return model if isinstance(model, str) and model.strip() else None, str(binary), str(host)

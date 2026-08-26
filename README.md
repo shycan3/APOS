@@ -67,6 +67,12 @@ Draft a TaskSpec from explicit inputs:
 apos draft "Add greeting behavior" --allow src/app/greeting.py --test "python -m unittest"
 ```
 
+Refine an existing TaskSpec with the configured Ollama model:
+
+```bash
+apos refine tasks/task-001.json
+```
+
 ```bash
 apos run examples/task-spec.sample.json
 ```

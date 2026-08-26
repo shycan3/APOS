@@ -8,8 +8,8 @@ import sys
 
 from . import __version__
 from .benchmark import BenchmarkError, BenchmarkRunOptions, run_benchmark_suite, validate_benchmark_suite
-from .config import ensure_project_memory, load_config, save_config
-from .draft import draft_task_spec, write_task_spec
+from .config import configured_ollama, ensure_project_memory, load_config, save_config
+from .draft import DraftError, draft_task_spec, refine_task_spec_with_ollama, write_task_spec
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
 from .models import SpecError, TaskSpec
@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return int(args.handler(args))
-    except (BenchmarkError, GitError, KernelError, SpecError) as exc:
+    except (BenchmarkError, DraftError, GitError, KernelError, SpecError) as exc:
         print(f"APOS error: {exc}", file=sys.stderr)
         return 1
 
@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     connect_ollama_parser = subcommands.add_parser("connect-ollama", help="configure Ollama as the Local Coder")
     connect_ollama_parser.add_argument("--model", required=True, help="Ollama model name, for example qwen2.5-coder:7b")
     connect_ollama_parser.add_argument("--ollama-binary", default="ollama", help="Ollama executable path")
+    connect_ollama_parser.add_argument("--ollama-host", default="http://127.0.0.1:11434", help="Ollama HTTP API host")
     connect_ollama_parser.set_defaults(handler=cmd_connect_ollama)
 
     status_parser = subcommands.add_parser("status", help="show APOS and Git project status")
@@ -72,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
     draft_parser.add_argument("--output", type=Path, help="write TaskSpec JSON to this path")
     draft_parser.add_argument("--json", action="store_true", help="print machine-readable draft output")
     draft_parser.set_defaults(handler=cmd_draft)
+
+    refine_parser = subcommands.add_parser("refine", help="refine a TaskSpec with the configured Ollama model")
+    refine_parser.add_argument("taskspec", type=Path)
+    refine_parser.add_argument("--model", help="override configured Ollama model")
+    refine_parser.add_argument("--ollama-binary", help="override configured Ollama executable path")
+    refine_parser.add_argument("--ollama-host", help="override configured Ollama HTTP API host")
+    refine_parser.add_argument("--timeout", type=int, help="Ollama timeout in seconds")
+    refine_parser.add_argument("--output", type=Path, help="write refined TaskSpec JSON to this path")
+    refine_parser.add_argument("--json", action="store_true", help="print machine-readable refine output")
+    refine_parser.set_defaults(handler=cmd_refine)
 
     run_parser = subcommands.add_parser("run", help="run an APOS 0.1 task loop")
     run_parser.add_argument("taskspec", type=Path)
@@ -165,6 +176,9 @@ def cmd_connect_ollama(args: argparse.Namespace) -> int:
     ensure_project_memory(root)
     config = load_config(root)
     config.setdefault("local_coder", {})["command"] = command
+    config.setdefault("ollama", {})["model"] = args.model
+    config.setdefault("ollama", {})["binary"] = args.ollama_binary
+    config.setdefault("ollama", {})["host"] = args.ollama_host
     save_config(root, config)
     print(f"Ollama Local Coder configured: {args.model}")
     return 0
@@ -235,6 +249,34 @@ def cmd_draft(args: argparse.Namespace) -> int:
         print(f"TaskSpec written: {args.output}")
     else:
         print(json.dumps(spec.to_dict(), indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_refine(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    configured_model, configured_binary, configured_host = configured_ollama(root)
+    model = args.model or configured_model
+    if not model:
+        raise DraftError("no Ollama model configured; run apos connect-ollama or pass --model")
+    binary = args.ollama_binary or configured_binary
+    host = args.ollama_host or configured_host
+    timeout = int(args.timeout or load_config(root).get("defaults", {}).get("command_timeout_seconds", 120))
+    spec = TaskSpec.load(args.taskspec)
+    refined = refine_task_spec_with_ollama(
+        spec=spec,
+        model=model,
+        ollama_binary=binary,
+        ollama_host=host,
+        timeout_seconds=timeout,
+    )
+    if args.output:
+        write_task_spec(root / args.output, refined)
+        if args.json:
+            print(json.dumps({"path": args.output.as_posix(), "task": refined.to_dict()}, indent=2, ensure_ascii=False))
+            return 0
+        print(f"Refined TaskSpec written: {args.output}")
+    else:
+        print(json.dumps(refined.to_dict(), indent=2, ensure_ascii=False))
     return 0
 
 
