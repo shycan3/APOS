@@ -81,9 +81,12 @@ the local repository.
 ```bash
 apos runs list
 apos runs show .apos/runs/task-001/20260826T010000Z-abc12345
+apos report .apos/runs/task-001/20260826T010000Z-abc12345
 ```
 
-Use `--json` with either command when another tool needs structured run data.
+Use `--json` with these commands when another tool needs structured run data.
+The report command produces a compact quality summary with status, attempts,
+test counts, rollback counts, commit information, and a deterministic score.
 
 ## TaskSpec shape
 

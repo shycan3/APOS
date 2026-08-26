@@ -11,6 +11,7 @@ from .config import ensure_project_memory, load_config, save_config
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
 from .models import SpecError, TaskSpec
+from .report import generate_quality_report
 from .runlog import list_run_logs, load_run_log
 
 
@@ -77,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
     runs_show_parser.add_argument("run_log", help="run log path, for example .apos/runs/task-001/<run-id>")
     runs_show_parser.add_argument("--json", action="store_true", help="print machine-readable run details")
     runs_show_parser.set_defaults(handler=cmd_runs_show)
+
+    report_parser = subcommands.add_parser("report", help="generate a compact quality report for one APOS run")
+    report_parser.add_argument("run_log", help="run log path, for example .apos/runs/task-001/<run-id>")
+    report_parser.add_argument("--json", action="store_true", help="print machine-readable quality report")
+    report_parser.set_defaults(handler=cmd_report)
 
     return parser
 
@@ -219,6 +225,22 @@ def cmd_runs_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    try:
+        report = generate_quality_report(root, args.run_log)
+    except FileNotFoundError as exc:
+        print(f"APOS error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+
+    _print_quality_report(report)
+    return 0
+
+
 def _print_summary(summary) -> None:
     print(f"Task: {summary.task_id}")
     print(f"Status: {summary.status}")
@@ -273,6 +295,28 @@ def _print_run_log(detail: dict[str, object]) -> None:
             print(f"  rollback: {rollback.get('status')} ({rollback.get('message')})")
         if item.get("patch_file"):
             print(f"  patch: {item.get('patch_file')}")
+
+
+def _print_quality_report(report: dict[str, object]) -> None:
+    quality = report.get("quality") if isinstance(report.get("quality"), dict) else {}
+    tests = report.get("tests") if isinstance(report.get("tests"), dict) else {}
+    responses = report.get("responses") if isinstance(report.get("responses"), dict) else {}
+    rollbacks = report.get("rollbacks") if isinstance(report.get("rollbacks"), dict) else {}
+    notes = quality.get("notes") if isinstance(quality.get("notes"), list) else []
+
+    print(f"Quality report: {report.get('run_log')}")
+    print(f"Task: {report.get('task_id')}")
+    print(f"Status: {report.get('status')}")
+    print(f"Verdict: {quality.get('verdict')}")
+    print(f"Score: {quality.get('score')}")
+    print(f"Attempts: {report.get('attempts')}")
+    print(f"Tests: {tests.get('passed')}/{tests.get('total')} passed, {tests.get('failed')} failed")
+    print(f"Responses: patch={responses.get('patch')}, permission_requests={responses.get('permission_requests')}")
+    print(f"Rollbacks: passed={rollbacks.get('passed')}, failed={rollbacks.get('failed')}")
+    if report.get("commit_hash"):
+        print(f"Commit: {report.get('commit_hash')}")
+    for note in notes:
+        print(f"- {note}")
 
 
 if __name__ == "__main__":

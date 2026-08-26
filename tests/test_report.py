@@ -1,0 +1,124 @@
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from apos.report import build_quality_report, generate_quality_report
+
+
+class QualityReportTests(unittest.TestCase):
+    def test_builds_report_from_successful_run(self):
+        report = build_quality_report(
+            {
+                "path": ".apos/runs/task-001/run-1",
+                "run": {"task_id": "TASK-001", "title": "Greeting", "branch": "apos/task-001", "started_at": "now"},
+                "task": {"task_id": "TASK-001"},
+                "summary": {
+                    "status": "PASS",
+                    "task_id": "TASK-001",
+                    "branch": "apos/task-001",
+                    "attempts": [{"attempt": 1, "status": "PASS"}],
+                    "committed": True,
+                    "commit_hash": "abc1234",
+                },
+                "attempts": [
+                    {
+                        "result": {"attempt": 1, "status": "PASS", "message": "ok"},
+                        "response": {"type": "patch"},
+                        "tests": [{"status": "PASS", "exit_code": 0}],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["quality"]["verdict"], "ready")
+        self.assertEqual(report["quality"]["score"], 100)
+        self.assertEqual(report["tests"]["passed"], 1)
+
+    def test_reports_retry_penalty_and_rollback(self):
+        report = build_quality_report(
+            {
+                "path": ".apos/runs/task-rollback/run-1",
+                "run": {"task_id": "TASK-ROLLBACK", "title": "Rollback", "branch": "apos/task-rollback"},
+                "task": {"task_id": "TASK-ROLLBACK"},
+                "summary": {
+                    "status": "PASS",
+                    "task_id": "TASK-ROLLBACK",
+                    "branch": "apos/task-rollback",
+                    "attempts": [{"attempt": 1, "status": "FAILED"}, {"attempt": 2, "status": "PASS"}],
+                    "committed": False,
+                },
+                "attempts": [
+                    {
+                        "result": {"attempt": 1, "status": "FAILED", "message": "test failed"},
+                        "response": {"type": "patch"},
+                        "tests": [{"status": "FAILED", "exit_code": 1}],
+                        "rollback": {"status": "PASS", "message": "rolled back"},
+                    },
+                    {
+                        "result": {"attempt": 2, "status": "PASS", "message": "ok"},
+                        "response": {"type": "patch"},
+                        "tests": [{"status": "PASS", "exit_code": 0}],
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(report["quality"]["verdict"], "usable")
+        self.assertEqual(report["quality"]["score"], 70)
+        self.assertEqual(report["rollbacks"]["passed"], 1)
+
+    def test_cli_generates_report_for_run_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            run_dir = root / ".apos" / "runs" / "task-001" / "20260826T010000Z-abc12345"
+            attempt_dir = run_dir / "attempt-01"
+            attempt_dir.mkdir(parents=True)
+            self._write_json(run_dir / "run.json", {"task_id": "TASK-001", "title": "Greeting", "branch": "apos/task-001"})
+            self._write_json(run_dir / "task.json", {"task_id": "TASK-001"})
+            self._write_json(attempt_dir / "attempt.json", {"attempt": 1, "status": "PASS", "message": "ok"})
+            self._write_json(attempt_dir / "response.json", {"type": "patch"})
+            self._write_json(attempt_dir / "tests.json", [{"status": "PASS", "exit_code": 0}])
+            self._write_json(
+                run_dir / "summary.json",
+                {
+                    "status": "PASS",
+                    "task_id": "TASK-001",
+                    "branch": "apos/task-001",
+                    "attempts": [{"attempt": 1, "status": "PASS"}],
+                    "committed": True,
+                    "commit_hash": "abc1234",
+                },
+            )
+
+            report = generate_quality_report(root, ".apos/runs/task-001/20260826T010000Z-abc12345")
+            self.assertEqual(report["quality"]["verdict"], "ready")
+
+            output = self._run(root, [sys.executable, "-m", "apos", "report", ".apos/runs/task-001/20260826T010000Z-abc12345"])
+            self.assertIn("Quality report:", output.stdout)
+            self.assertIn("Verdict: ready", output.stdout)
+
+            json_output = self._run(
+                root,
+                [sys.executable, "-m", "apos", "report", ".apos/runs/task-001/20260826T010000Z-abc12345", "--json"],
+            )
+            self.assertEqual(json.loads(json_output.stdout)["quality"]["score"], 100)
+
+    @staticmethod
+    def _write_json(path: Path, data: object) -> None:
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+        completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)
+        if completed.returncode != 0:
+            raise AssertionError(completed.stderr or completed.stdout)
+        return completed
+
+
+if __name__ == "__main__":
+    unittest.main()
