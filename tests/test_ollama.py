@@ -72,6 +72,22 @@ Please approve."
         self.assertEqual(extracted["permission"], "write")
         self.assertIn("Need write access", extracted["reason"])
 
+    def test_recovers_malformed_fenced_file_replacement(self):
+        output = """```json
+{
+  "type": "file_replacement",
+  "path": "sandbox/todo_app/todos.py",
+  "content": "def active_titles(items: list[dict[str, object]]) -> list[str\x1b[8D\x1b[K
+list[str]:\\n    return [str(item[\\\"title\\\"]) for item in items if not item[\\\"completed\\\"]]"
+}
+```"""
+
+        extracted = json.loads(extract_protocol_output(output))
+
+        self.assertEqual(extracted["type"], "file_replacement")
+        self.assertEqual(extracted["path"], "sandbox/todo_app/todos.py")
+        self.assertIn("active_titles", extracted["content"])
+
     def test_model_prompt_contains_protocol(self):
         prompt = build_model_prompt('{"protocol":"APOS_LOCAL_CODER_PATCH_V1"}')
 

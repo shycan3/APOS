@@ -176,7 +176,7 @@ class Kernel:
                 patch_applied = True
                 permissions.validate_write_paths(changed_by_patch)
             except (PermissionError, GitError) as exc:
-                message = str(exc)
+                message = _patch_failure_message(str(exc))
                 if patch_applied:
                     message = self._rollback_failed_patch(recorder, attempt_number, response.patch, message)
                 attempt = AttemptResult(attempt_number, "FAILED", message)
@@ -337,3 +337,13 @@ def _append_unique(values: list[str], value: str) -> list[str]:
     if normalized in seen:
         return list(values)
     return [*values, normalized]
+
+
+def _patch_failure_message(message: str) -> str:
+    if "git apply" not in message:
+        return message
+    return (
+        f"{message}\n"
+        "The previous unified diff could not be applied. "
+        "For the next attempt, return a JSON file_replacement object with the complete final file content."
+    )

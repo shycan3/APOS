@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
 
     protocol_output = extract_protocol_output(output)
     if not protocol_output:
-        print("APOS Ollama adapter error: model did not return a patch or permission request", file=sys.stderr)
+        print("APOS Ollama adapter error: model did not return a patch, file_replacement, or permission request", file=sys.stderr)
         print(output, file=sys.stderr)
         return 3
 
@@ -165,7 +165,7 @@ def _extract_json(value: str) -> str:
     try:
         payload = json.loads(value)
     except json.JSONDecodeError:
-        payload = _recover_permission_request(value)
+        payload = _recover_structured_json_response(value)
         if payload is None:
             return ""
     if payload.get("type") not in {"request_permission", "patch", "file_replacement"}:
@@ -218,8 +218,34 @@ def _recover_permission_request(value: str) -> dict[str, str] | None:
     }
 
 
+def _recover_structured_json_response(value: str) -> dict[str, str] | None:
+    file_replacement = _recover_file_replacement(value)
+    if file_replacement is not None:
+        return file_replacement
+    return _recover_permission_request(value)
+
+
+def _recover_file_replacement(value: str) -> dict[str, str] | None:
+    if "file_replacement" not in value:
+        return None
+    path = _extract_json_string_field(value, "path")
+    if not path:
+        return None
+    content = _extract_json_string_field(value, "content")
+    if not content:
+        return None
+    return {
+        "type": "file_replacement",
+        "path": path,
+        "content": content,
+    }
+
+
 def _extract_json_string_field(value: str, field: str) -> str:
-    match = re.search(rf'"{re.escape(field)}"\s*:\s*"(?P<value>.*?)"\s*(?:,|\}})', value, re.DOTALL)
+    if field == "content":
+        match = re.search(rf'"{re.escape(field)}"\s*:\s*"(?P<value>.*)"\s*\}}', value, re.DOTALL)
+    else:
+        match = re.search(rf'"{re.escape(field)}"\s*:\s*"(?P<value>.*?)"\s*(?:,|\}})', value, re.DOTALL)
     if not match:
         return ""
     raw = match.group("value")
