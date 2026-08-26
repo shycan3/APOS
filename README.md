@@ -116,7 +116,14 @@ and include each task summary, quality report, and runner profile metadata.
 ```bash
 apos benchmark results list
 apos benchmark results show .apos/benchmarks/apos-fast-track-0-1/<run-id>/result.json
+apos benchmark compare \
+  .apos/benchmarks/apos-fast-track-0-1/<run-a>/result.json \
+  .apos/benchmarks/apos-fast-track-0-1/<run-b>/result.json
 ```
+
+The comparison command ranks benchmark results by average quality score,
+completed task pass count, and total task duration so different APOS profiles or
+external runner imports can be judged side by side.
 
 ## TaskSpec shape
 

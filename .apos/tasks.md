@@ -10,5 +10,6 @@
 - Done: add AI-assisted TaskSpec refinement using the configured Ollama model.
 - Done: add benchmark result inspection/list commands.
 - Done: add model/coder profile metadata to benchmark results.
-- Next: add a minimal competitive comparison report across benchmark results.
+- Done: add a minimal competitive comparison report across benchmark results.
+- Next: add failure reason classification to reports and benchmark results.
 - Later: add Cloud Controller TaskSpec generation.

@@ -10,6 +10,7 @@ from . import __version__
 from .benchmark import (
     BenchmarkError,
     BenchmarkRunOptions,
+    compare_benchmark_results,
     list_benchmark_results,
     load_benchmark_result,
     run_benchmark_suite,
@@ -141,6 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_run_parser.add_argument("--keep-going", action="store_true", help="continue after a failed benchmark task")
     benchmark_run_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark result")
     benchmark_run_parser.set_defaults(handler=cmd_benchmark_run)
+
+    benchmark_compare_parser = benchmark_subcommands.add_parser("compare", help="compare two or more benchmark results")
+    benchmark_compare_parser.add_argument("results", nargs="+", help="benchmark result paths or result directories")
+    benchmark_compare_parser.add_argument("--json", action="store_true", help="print machine-readable benchmark comparison")
+    benchmark_compare_parser.set_defaults(handler=cmd_benchmark_compare)
 
     benchmark_results_parser = benchmark_subcommands.add_parser("results", help="inspect benchmark run results")
     benchmark_results_subcommands = benchmark_results_parser.add_subparsers(dest="benchmark_results_command")
@@ -408,6 +414,16 @@ def cmd_benchmark_run(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "PASS" else 2
 
 
+def cmd_benchmark_compare(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    comparison = compare_benchmark_results(root, args.results)
+    if args.json:
+        print(json.dumps(comparison, indent=2, ensure_ascii=False))
+        return 0
+    _print_benchmark_comparison(comparison)
+    return 0
+
+
 def cmd_benchmark_results_list(args: argparse.Namespace) -> int:
     root = GitClient(Path.cwd()).ensure_repo()
     entries = list_benchmark_results(root, limit=args.limit)
@@ -566,6 +582,27 @@ def _print_benchmark_result(result: dict[str, object]) -> None:
             f"score={quality.get('score')}  duration={item.get('duration_seconds')}s  "
             f"log={item.get('run_log')}"
         )
+
+
+def _print_benchmark_comparison(comparison: dict[str, object]) -> None:
+    summary = comparison.get("summary") if isinstance(comparison.get("summary"), dict) else {}
+    results = comparison.get("results") if isinstance(comparison.get("results"), list) else []
+    print("Benchmark comparison")
+    print(f"Results: {summary.get('result_count')}")
+    if summary.get("best_result_id"):
+        print(f"Best: {summary.get('best_result_id')}  suite={summary.get('best_suite_id')}  score={summary.get('best_score')}")
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        model = item.get("ollama_model") or "-"
+        print(
+            f"#{item.get('rank')}  {item.get('result_id')}  {item.get('status')}  "
+            f"suite={item.get('suite_id')}  tasks={item.get('passed_tasks')}/{item.get('total_tasks')}  "
+            f"score={item.get('average_quality_score')}  duration={item.get('total_duration_seconds')}s  "
+            f"model={model}"
+        )
+        if item.get("result_path"):
+            print(f"  {item.get('result_path')}")
 
 
 if __name__ == "__main__":

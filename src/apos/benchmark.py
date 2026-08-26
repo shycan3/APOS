@@ -257,6 +257,36 @@ def load_benchmark_result(root: Path, result_path: str) -> dict[str, object]:
     return result
 
 
+def compare_benchmark_results(root: Path, result_paths: list[str]) -> dict[str, object]:
+    if len(result_paths) < 2:
+        raise BenchmarkError("at least two benchmark results are required for comparison")
+
+    entries = [_comparison_entry(load_benchmark_result(root, result_path), index) for index, result_path in enumerate(result_paths)]
+    ranked = sorted(
+        entries,
+        key=lambda entry: (
+            entry["average_quality_score"] if isinstance(entry["average_quality_score"], int | float) else -1,
+            entry["passed_tasks"],
+            -entry["total_duration_seconds"],
+            -entry["input_order"],
+        ),
+        reverse=True,
+    )
+    for rank, entry in enumerate(ranked, start=1):
+        entry["rank"] = rank
+    best = ranked[0] if ranked else None
+    return {
+        "kind": "benchmark_comparison",
+        "results": ranked,
+        "summary": {
+            "result_count": len(entries),
+            "best_result_id": best.get("result_id") if best else None,
+            "best_suite_id": best.get("suite_id") if best else None,
+            "best_score": best.get("average_quality_score") if best else None,
+        },
+    }
+
+
 def resolve_benchmark_result_path(root: Path, result_path: str) -> Path:
     candidate = Path(result_path)
     if not candidate.is_absolute():
@@ -310,6 +340,38 @@ def _benchmark_summary(tasks: list[dict[str, object]], total_tasks: int) -> dict
         "passed_tasks": passed,
         "failed_tasks": failed,
         "average_quality_score": average_score,
+    }
+
+
+def _comparison_entry(result: dict[str, object], input_order: int) -> dict[str, object]:
+    suite = result.get("suite") if isinstance(result.get("suite"), dict) else {}
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    runner_profile = result.get("runner_profile") if isinstance(result.get("runner_profile"), dict) else {}
+    ollama = runner_profile.get("ollama") if isinstance(runner_profile.get("ollama"), dict) else {}
+    tasks = result.get("tasks") if isinstance(result.get("tasks"), list) else []
+    total_duration = round(
+        sum(item.get("duration_seconds") for item in tasks if isinstance(item, dict) and isinstance(item.get("duration_seconds"), int | float)),
+        3,
+    )
+    total_tasks = int(summary.get("total_tasks") or 0)
+    passed_tasks = int(summary.get("passed_tasks") or 0)
+    average_score = summary.get("average_quality_score")
+    return {
+        "input_order": input_order,
+        "rank": None,
+        "result_path": str(result.get("result_path") or ""),
+        "suite_id": str(suite.get("suite_id") or ""),
+        "result_id": str(result.get("result_id") or ""),
+        "status": str(result.get("status") or "UNKNOWN"),
+        "started_at": str(result.get("started_at") or ""),
+        "total_tasks": total_tasks,
+        "passed_tasks": passed_tasks,
+        "pass_rate": round(passed_tasks / total_tasks, 4) if total_tasks else 0.0,
+        "average_quality_score": float(average_score) if isinstance(average_score, int | float) else None,
+        "total_duration_seconds": total_duration,
+        "apos_version": str(runner_profile.get("apos_version") or ""),
+        "coder_command": str(runner_profile.get("coder_command") or ""),
+        "ollama_model": str(ollama.get("model") or ""),
     }
 
 

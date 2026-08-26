@@ -9,6 +9,7 @@ from apos.benchmark import (
     BenchmarkError,
     BenchmarkRunOptions,
     BenchmarkSuite,
+    compare_benchmark_results,
     list_benchmark_results,
     load_benchmark_result,
     run_benchmark_suite,
@@ -189,9 +190,95 @@ print('''diff --git a/app.py b/app.py
                 self.assertIn("Runner: APOS", show_output.stdout)
                 self.assertIn("TASK-001", show_output.stdout)
 
+    def test_compares_benchmark_results_and_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            result_a = root / ".apos" / "benchmarks" / "suite-1" / "run-a" / "result.json"
+            result_b = root / ".apos" / "benchmarks" / "suite-1" / "run-b" / "result.json"
+            result_a.parent.mkdir(parents=True)
+            result_b.parent.mkdir(parents=True)
+            self._write_benchmark_result(result_a, "suite-1", "run-a", passed=1, total=2, score=70, duration=12.5, model="model-a")
+            self._write_benchmark_result(result_b, "suite-1", "run-b", passed=2, total=2, score=92, duration=9.25, model="model-b")
+
+            comparison = compare_benchmark_results(root, [str(result_a.relative_to(root)), str(result_b.relative_to(root))])
+
+            self.assertEqual(comparison["summary"]["result_count"], 2)
+            self.assertEqual(comparison["summary"]["best_result_id"], "run-b")
+            self.assertEqual(comparison["results"][0]["rank"], 1)
+            self.assertEqual(comparison["results"][0]["result_id"], "run-b")
+            self.assertEqual(comparison["results"][0]["pass_rate"], 1.0)
+            self.assertEqual(comparison["results"][0]["total_duration_seconds"], 9.25)
+
+            output = self._run(
+                root,
+                [
+                    sys.executable,
+                    "-m",
+                    "apos",
+                    "benchmark",
+                    "compare",
+                    str(result_a.relative_to(root)),
+                    str(result_b.relative_to(root)),
+                ],
+            )
+            self.assertIn("Benchmark comparison", output.stdout)
+            self.assertIn("#1  run-b", output.stdout)
+            self.assertIn("model=model-b", output.stdout)
+
+            json_output = self._run(
+                root,
+                [
+                    sys.executable,
+                    "-m",
+                    "apos",
+                    "benchmark",
+                    "compare",
+                    str(result_a.relative_to(root)),
+                    str(result_b.relative_to(root)),
+                    "--json",
+                ],
+            )
+            self.assertEqual(json.loads(json_output.stdout)["summary"]["best_result_id"], "run-b")
+
     @staticmethod
     def _write_json(path: Path, data: object) -> None:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    @classmethod
+    def _write_benchmark_result(
+        cls,
+        path: Path,
+        suite_id: str,
+        result_id: str,
+        passed: int,
+        total: int,
+        score: int,
+        duration: float,
+        model: str,
+    ) -> None:
+        cls._write_json(
+            path,
+            {
+                "suite": {"suite_id": suite_id, "title": "Suite"},
+                "runner_profile": {
+                    "apos_version": "0.1.0",
+                    "coder_command": f"coder-for-{model}",
+                    "ollama": {"model": model},
+                },
+                "started_at": "20260826T010000Z",
+                "result_id": result_id,
+                "status": "PASS" if passed == total else "FAILED",
+                "tasks": [{"duration_seconds": duration}],
+                "summary": {
+                    "total_tasks": total,
+                    "completed_tasks": total,
+                    "passed_tasks": passed,
+                    "failed_tasks": total - passed,
+                    "average_quality_score": score,
+                },
+            },
+        )
 
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
