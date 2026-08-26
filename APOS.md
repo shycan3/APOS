@@ -23,6 +23,7 @@ APOS 0.1 focuses on one reliable task loop:
 - generate compact quality reports with `apos report`
 - validate, inspect, and run benchmark suites with `apos benchmark`
 - list and inspect benchmark results with `apos benchmark results`
+- record runner profile metadata in benchmark results
 
 ## Rules
 

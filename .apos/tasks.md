@@ -9,5 +9,6 @@
 - Done: add TaskSpec draft/generation support.
 - Done: add AI-assisted TaskSpec refinement using the configured Ollama model.
 - Done: add benchmark result inspection/list commands.
-- Next: add model/coder profile metadata to benchmark results.
+- Done: add model/coder profile metadata to benchmark results.
+- Next: add a minimal competitive comparison report across benchmark results.
 - Later: add Cloud Controller TaskSpec generation.

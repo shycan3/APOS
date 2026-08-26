@@ -111,7 +111,7 @@ apos benchmark run examples/benchmarks/fast-track-suite.json
 A benchmark suite groups TaskSpec files with comparison metadata such as
 category, difficulty, weight, tags, and metrics.
 Benchmark run results are written under `.apos/benchmarks/<suite-id>/<run-id>/`
-and include each task summary plus its quality report.
+and include each task summary, quality report, and runner profile metadata.
 
 ```bash
 apos benchmark results list

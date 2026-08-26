@@ -8,7 +8,8 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from .config import apos_dir
+from . import __version__
+from .config import apos_dir, configured_coder_command, configured_ollama
 from .git import GitClient
 from .kernel import Kernel, RunOptions
 from .models import SpecError, TaskSpec
@@ -220,6 +221,7 @@ def run_benchmark_suite(root: Path, suite_path: Path, options: BenchmarkRunOptio
 
     result = {
         "suite": suite.to_dict(),
+        "runner_profile": _runner_profile(root, options),
         "started_at": started_at,
         "result_id": result_id,
         "status": _benchmark_status(tasks, len(suite.tasks)),
@@ -308,6 +310,26 @@ def _benchmark_summary(tasks: list[dict[str, object]], total_tasks: int) -> dict
         "passed_tasks": passed,
         "failed_tasks": failed,
         "average_quality_score": average_score,
+    }
+
+
+def _runner_profile(root: Path, options: BenchmarkRunOptions) -> dict[str, object]:
+    model, binary, host = configured_ollama(root)
+    return {
+        "apos_version": __version__,
+        "coder_command": options.coder_command or configured_coder_command(root),
+        "ollama": {
+            "model": model,
+            "binary": binary,
+            "host": host,
+        },
+        "options": {
+            "max_attempts": options.max_attempts,
+            "no_commit": options.no_commit,
+            "allow_dirty": options.allow_dirty,
+            "command_timeout_seconds": options.command_timeout_seconds,
+            "keep_going": options.keep_going,
+        },
     }
 
 

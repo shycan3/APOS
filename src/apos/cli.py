@@ -543,11 +543,15 @@ def _print_benchmark_suite(suite: dict[str, object]) -> None:
 
 def _print_benchmark_result(result: dict[str, object]) -> None:
     suite = result.get("suite") if isinstance(result.get("suite"), dict) else {}
+    runner_profile = result.get("runner_profile") if isinstance(result.get("runner_profile"), dict) else {}
+    ollama = runner_profile.get("ollama") if isinstance(runner_profile.get("ollama"), dict) else {}
     summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
     tasks = result.get("tasks") if isinstance(result.get("tasks"), list) else []
     print(f"Benchmark result: {result.get('result_id')}")
     print(f"Suite: {suite.get('suite_id')}")
     print(f"Status: {result.get('status')}")
+    if runner_profile:
+        print(f"Runner: APOS {runner_profile.get('apos_version')}  model={ollama.get('model') or '-'}")
     print(f"Tasks: {summary.get('passed_tasks')}/{summary.get('total_tasks')} passed")
     print(f"Average score: {summary.get('average_quality_score')}")
     print(f"Result file: {result.get('result_path')}")

@@ -164,6 +164,8 @@ print('''diff --git a/app.py b/app.py
 
                 self.assertEqual(result["status"], "PASS", result)
                 self.assertEqual(result["summary"]["passed_tasks"], 1)
+                self.assertEqual(result["runner_profile"]["apos_version"], "0.1.0")
+                self.assertIn("fake_coder.py", result["runner_profile"]["coder_command"])
                 self.assertEqual(result["tasks"][0]["report"]["quality"]["verdict"], "ready")
                 self.assertTrue((root / str(result["result_path"])).exists())
 
@@ -184,6 +186,7 @@ print('''diff --git a/app.py b/app.py
                     [sys.executable, "-m", "apos", "benchmark", "results", "show", str(result["result_path"])],
                 )
                 self.assertIn("Benchmark result:", show_output.stdout)
+                self.assertIn("Runner: APOS", show_output.stdout)
                 self.assertIn("TASK-001", show_output.stdout)
 
     @staticmethod
