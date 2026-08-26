@@ -18,7 +18,8 @@
 - Benchmark results can be compared with `apos benchmark compare`, ranked by quality score, passed task count, and total duration.
 - Benchmark summaries aggregate primary failure classes and detailed failure reason counts.
 - The fast-track benchmark suite now contains 3 tasks: greeting, slug normalization, and active todo filtering.
-- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-0-1/20260826T130402Z-c06379b5/result.json` (`PASS`, 1/1 tasks, average quality score 95.0, preflight PASS, captured before the suite expanded to 3 tasks).
+- Latest captured benchmark result: `.apos/benchmarks/apos-fast-track-0-1/20260826T131603Z-d6399317/result.json` (`FAILED`, 2/3 tasks, average quality score 66.67).
+- The latest expanded benchmark failure is TASK-003, caused by malformed/corrupt diff output from the Ollama coder after the slug benchmark expectation was clarified.
 - Benchmark runs use per-result task branches and return to the starting branch after each task so larger suites can compare tasks from a consistent baseline.
 - Failed patches that apply but do not pass verification are reverse-applied before the next retry.
 - Ollama 0.32.15 is installed locally and `qwen2.5-coder:7b` is available as the configured Local Coder model.
