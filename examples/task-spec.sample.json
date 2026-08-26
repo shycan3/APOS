@@ -1,0 +1,24 @@
+{
+  "task_id": "TASK-001",
+  "title": "Add greeting behavior",
+  "goal": "Update the greeting function while preserving the public API.",
+  "allowed_files": [
+    "src/app/greeting.py",
+    "tests/test_greeting.py"
+  ],
+  "read_only_files": [
+    "src/app/APOS.md"
+  ],
+  "constraints": [
+    "Do not change the public function name."
+  ],
+  "expected_behavior": [
+    "greet('APOS') returns 'Hello, APOS!'"
+  ],
+  "test_commands": [
+    "python -m pytest tests/test_greeting.py"
+  ],
+  "context_requirements": [],
+  "max_attempts": 3
+}
+

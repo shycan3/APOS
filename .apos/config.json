@@ -1,0 +1,11 @@
+{
+  "version": "0.1",
+  "local_coder": {
+    "command": null
+  },
+  "defaults": {
+    "branch_prefix": "apos/task-",
+    "max_attempts": 3,
+    "command_timeout_seconds": 120
+  }
+}
