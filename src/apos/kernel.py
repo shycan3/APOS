@@ -91,13 +91,17 @@ class Kernel:
                 previous_error = message
                 continue
 
+            changed_by_patch: list[str] = []
+            patch_applied = False
             try:
                 changed_by_patch = permissions.validate_patch(response.patch)
                 self.git.apply_patch(response.patch)
-                changed_in_repo = self.git.changed_files()
-                permissions.validate_write_paths(changed_in_repo)
+                patch_applied = True
+                permissions.validate_write_paths(changed_by_patch)
             except (PermissionError, GitError) as exc:
                 message = str(exc)
+                if patch_applied:
+                    message = self._rollback_failed_patch(recorder, attempt_number, response.patch, message)
                 attempt = AttemptResult(attempt_number, "FAILED", message)
                 attempts.append(attempt)
                 recorder.record_attempt(attempt)
@@ -108,10 +112,9 @@ class Kernel:
             recorder.record_tests(attempt_number, test_results)
             if all(result.passed for result in test_results):
                 try:
-                    changed_in_repo = self.git.changed_files()
-                    permissions.validate_write_paths(changed_in_repo)
+                    permissions.validate_write_paths(changed_by_patch)
                 except PermissionError as exc:
-                    message = str(exc)
+                    message = self._rollback_failed_patch(recorder, attempt_number, response.patch, str(exc))
                     attempt = AttemptResult(attempt_number, "FAILED", message, test_results)
                     attempts.append(attempt)
                     recorder.record_attempt(attempt)
@@ -129,7 +132,7 @@ class Kernel:
                 if options.no_commit:
                     return self._finish(recorder, RunSummary("PASS", spec.task_id, branch, attempts, committed=False))
                 commit_hash = self.git.commit(
-                    changed_in_repo,
+                    changed_by_patch,
                     f"APOS {spec.task_id}: {spec.display_title()}",
                 )
                 return self._finish(
@@ -138,6 +141,7 @@ class Kernel:
                 )
 
             previous_error = summarize_failures(test_results)
+            previous_error = self._rollback_failed_patch(recorder, attempt_number, response.patch, previous_error)
             attempt = AttemptResult(attempt_number, "FAILED", previous_error, test_results)
             attempts.append(attempt)
             recorder.record_attempt(attempt)
@@ -156,3 +160,13 @@ class Kernel:
         )
         recorder.record_summary(summary_with_log)
         return summary_with_log
+
+    def _rollback_failed_patch(self, recorder: RunRecorder, attempt: int, patch: str, message: str) -> str:
+        try:
+            self.git.reverse_patch(patch)
+        except GitError as exc:
+            rollback_message = f"rollback failed: {exc}"
+            recorder.record_rollback(attempt, "FAILED", rollback_message)
+            return f"{message}\n{rollback_message}"
+        recorder.record_rollback(attempt, "PASS", "failed attempt patch was rolled back")
+        return message

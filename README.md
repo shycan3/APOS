@@ -19,6 +19,8 @@ human-written TaskSpec
 
 APOS 0.1 does not include a Cloud Controller yet. A human writes the TaskSpec,
 and APOS runs the implementation loop against a local coder command.
+If a patch applies but verification fails, APOS rolls that patch back before the
+next retry so attempts do not accumulate broken intermediate edits.
 
 ## Install for development
 

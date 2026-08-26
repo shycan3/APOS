@@ -14,6 +14,7 @@ APOS 0.1 focuses on one reliable task loop:
 - apply only authorized changes
 - run verification commands
 - retry on failure
+- roll back failed attempt patches before retrying
 - commit successful task results
 - write inspectable run logs under `.apos/runs/`
 

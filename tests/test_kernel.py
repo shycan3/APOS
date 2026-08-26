@@ -100,6 +100,90 @@ class KernelTests(unittest.TestCase):
                 status = self._git_status(root)
                 self.assertNotIn(".apos/runs", status)
 
+    def test_rolls_back_failed_attempt_before_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run(root, ["git", "init"])
+            self._run(root, ["git", "config", "user.email", "apos@example.test"])
+            self._run(root, ["git", "config", "user.name", "APOS Test"])
+
+            (root / "app.py").write_text("def greet(name):\n    return name\n", encoding="utf-8")
+            (root / "test_app.py").write_text(
+                textwrap.dedent(
+                    """
+                    import unittest
+                    from app import greet
+
+
+                    class GreetingTests(unittest.TestCase):
+                        def test_greet(self):
+                            self.assertEqual(greet("APOS"), "Hello, APOS!")
+
+
+                    if __name__ == "__main__":
+                        unittest.main()
+                    """
+                ).lstrip(),
+                encoding="utf-8",
+            )
+            self._run(root, ["git", "add", "."])
+            self._run(root, ["git", "commit", "-m", "initial"])
+
+            with tempfile.TemporaryDirectory() as coder_tmp:
+                coder = Path(coder_tmp) / "retry_coder.py"
+                coder.write_text(
+                    textwrap.dedent(
+                        """
+                        import json
+                        import sys
+
+                        prompt = json.loads(sys.stdin.read())
+                        if prompt["attempt"] == 1:
+                            replacement = '    return "Wrong"'
+                        else:
+                            replacement = '    return f"Hello, {name}!"'
+
+                        print(f'''diff --git a/app.py b/app.py
+                        --- a/app.py
+                        +++ b/app.py
+                        @@ -1,2 +1,2 @@
+                         def greet(name):
+                        -    return name
+                        +{replacement}
+                        '''.replace("                        ", ""), end="")
+                        """
+                    ).lstrip(),
+                    encoding="utf-8",
+                )
+
+                spec = TaskSpec.from_mapping(
+                    {
+                        "task_id": "TASK-ROLLBACK",
+                        "title": "Rollback",
+                        "goal": "Make greet return a friendly message.",
+                        "allowed_files": ["app.py"],
+                        "test_commands": [f"{sys.executable} -m unittest test_app.py"],
+                        "max_attempts": 2,
+                    }
+                )
+
+                summary = Kernel(root).run_task(
+                    spec,
+                    RunOptions(
+                        coder_command=f"{sys.executable} {coder}",
+                        no_commit=True,
+                        command_timeout_seconds=30,
+                    ),
+                )
+
+                self.assertEqual(summary.status, "PASS", summary.to_dict())
+                self.assertEqual([attempt.status for attempt in summary.attempts], ["FAILED", "PASS"])
+                self.assertIn('return f"Hello, {name}!"', (root / "app.py").read_text(encoding="utf-8"))
+
+                run_log = root / str(summary.run_log)
+                rollback = json.loads((run_log / "attempt-01" / "rollback.json").read_text(encoding="utf-8"))
+                self.assertEqual(rollback["status"], "PASS")
+
     @staticmethod
     def _run(cwd: Path, args: list[str]) -> None:
         completed = subprocess.run(args, cwd=cwd, text=True, capture_output=True)

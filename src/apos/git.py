@@ -83,6 +83,10 @@ class GitClient:
         self.run(["apply", "--recount", "--ignore-space-change", "--check", "-"], input_text=patch)
         self.run(["apply", "--recount", "--ignore-space-change", "-"], input_text=patch)
 
+    def reverse_patch(self, patch: str) -> None:
+        self.run(["apply", "--reverse", "--recount", "--ignore-space-change", "--check", "-"], input_text=patch)
+        self.run(["apply", "--reverse", "--recount", "--ignore-space-change", "-"], input_text=patch)
+
     def diff(self) -> str:
         return self.run(["diff"], check=False).stdout
 

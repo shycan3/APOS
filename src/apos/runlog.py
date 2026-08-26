@@ -55,6 +55,15 @@ class RunRecorder:
     def record_tests(self, attempt: int, results: list[ExecutionResult]) -> None:
         self.write_json(f"attempt-{attempt:02d}/tests.json", [result.to_dict() for result in results])
 
+    def record_rollback(self, attempt: int, status: str, message: str) -> None:
+        self.write_json(
+            f"attempt-{attempt:02d}/rollback.json",
+            {
+                "status": status,
+                "message": message,
+            },
+        )
+
     def record_attempt(self, attempt: AttemptResult) -> None:
         self.write_json(f"attempt-{attempt.attempt:02d}/attempt.json", attempt.to_dict())
 
