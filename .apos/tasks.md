@@ -6,5 +6,6 @@
 - Done: generate a compact quality report from a run log.
 - Done: create benchmark task suite metadata.
 - Done: run a benchmark suite and collect per-task reports.
-- Next: add TaskSpec draft/generation support.
+- Done: add TaskSpec draft/generation support.
+- Next: add AI-assisted TaskSpec refinement using the configured Local Coder model.
 - Later: add Cloud Controller TaskSpec generation.

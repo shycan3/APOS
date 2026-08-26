@@ -9,6 +9,7 @@ import sys
 from . import __version__
 from .benchmark import BenchmarkError, BenchmarkRunOptions, run_benchmark_suite, validate_benchmark_suite
 from .config import ensure_project_memory, load_config, save_config
+from .draft import draft_task_spec, write_task_spec
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
 from .models import SpecError, TaskSpec
@@ -56,6 +57,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     template_parser = subcommands.add_parser("task-template", help="print a minimal TaskSpec template")
     template_parser.set_defaults(handler=cmd_task_template)
+
+    draft_parser = subcommands.add_parser("draft", help="draft a TaskSpec JSON file from explicit inputs")
+    draft_parser.add_argument("goal", help="desired project change")
+    draft_parser.add_argument("--task-id", help="explicit TaskSpec id")
+    draft_parser.add_argument("--title", help="short TaskSpec title")
+    draft_parser.add_argument("--allow", action="append", default=[], help="writable file path; repeat for multiple files")
+    draft_parser.add_argument("--read", action="append", default=[], help="read-only context file path; repeat for multiple files")
+    draft_parser.add_argument("--test", action="append", default=[], help="verification command; repeat for multiple commands")
+    draft_parser.add_argument("--constraint", action="append", default=[], help="implementation constraint; repeat for multiple constraints")
+    draft_parser.add_argument("--expect", action="append", default=[], help="expected behavior; repeat for multiple expectations")
+    draft_parser.add_argument("--context", action="append", default=[], help="context requirement note; repeat for multiple notes")
+    draft_parser.add_argument("--max-attempts", type=int, default=3, help="retry budget for the drafted task")
+    draft_parser.add_argument("--output", type=Path, help="write TaskSpec JSON to this path")
+    draft_parser.add_argument("--json", action="store_true", help="print machine-readable draft output")
+    draft_parser.set_defaults(handler=cmd_draft)
 
     run_parser = subcommands.add_parser("run", help="run an APOS 0.1 task loop")
     run_parser.add_argument("taskspec", type=Path)
@@ -193,6 +209,32 @@ def cmd_task_template(args: argparse.Namespace) -> int:
         "max_attempts": 3,
     }
     print(json.dumps(template, indent=2))
+    return 0
+
+
+def cmd_draft(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    spec = draft_task_spec(
+        root=root,
+        goal=args.goal,
+        allowed_files=args.allow,
+        read_only_files=args.read,
+        test_commands=args.test,
+        task_id=args.task_id,
+        title=args.title,
+        constraints=args.constraint or None,
+        expected_behavior=args.expect or None,
+        context_requirements=args.context or None,
+        max_attempts=args.max_attempts,
+    )
+    if args.output:
+        write_task_spec(root / args.output, spec)
+        if args.json:
+            print(json.dumps({"path": args.output.as_posix(), "task": spec.to_dict()}, indent=2, ensure_ascii=False))
+            return 0
+        print(f"TaskSpec written: {args.output}")
+    else:
+        print(json.dumps(spec.to_dict(), indent=2, ensure_ascii=False))
     return 0
 
 

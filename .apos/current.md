@@ -1,7 +1,8 @@
 # Current State
 
 - APOS 0.1 is implemented as a Python package in `src/apos`.
-- The CLI exposes `init`, `connect`, `connect-ollama`, `status`, `validate`, `task-template`, `run`, `runs`, `report`, and `benchmark`.
+- The CLI exposes `init`, `connect`, `connect-ollama`, `status`, `validate`, `task-template`, `draft`, `run`, `runs`, `report`, and `benchmark`.
+- The `draft` command can generate a valid TaskSpec from explicit goal, allowed file, test, expectation, and constraint inputs.
 - The core runtime accepts a human-written TaskSpec, requests a unified diff from a configured Local Coder command, validates changed paths against `allowed_files`, applies the patch, runs test commands, retries on failure, and can commit successful changes.
 - Each run writes inspectable artifacts under `.apos/runs/<task-id>/<run-id>/`, including prompts, coder responses, test results, and summary JSON.
 - The CLI can list and inspect stored run logs with `apos runs list` and `apos runs show`.

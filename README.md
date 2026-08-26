@@ -61,6 +61,12 @@ Or set `APOS_CODER_COMMAND`.
 
 ## Run a task
 
+Draft a TaskSpec from explicit inputs:
+
+```bash
+apos draft "Add greeting behavior" --allow src/app/greeting.py --test "python -m unittest"
+```
+
 ```bash
 apos run examples/task-spec.sample.json
 ```
