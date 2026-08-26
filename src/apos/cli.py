@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from . import __version__
+from .benchmark import BenchmarkError, validate_benchmark_suite
 from .config import ensure_project_memory, load_config, save_config
 from .git import GitClient, GitError
 from .kernel import Kernel, KernelError, RunOptions
@@ -23,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return int(args.handler(args))
-    except (GitError, KernelError, SpecError) as exc:
+    except (BenchmarkError, GitError, KernelError, SpecError) as exc:
         print(f"APOS error: {exc}", file=sys.stderr)
         return 1
 
@@ -83,6 +84,18 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("run_log", help="run log path, for example .apos/runs/task-001/<run-id>")
     report_parser.add_argument("--json", action="store_true", help="print machine-readable quality report")
     report_parser.set_defaults(handler=cmd_report)
+
+    benchmark_parser = subcommands.add_parser("benchmark", help="inspect benchmark task suites")
+    benchmark_subcommands = benchmark_parser.add_subparsers(dest="benchmark_command")
+
+    benchmark_validate_parser = benchmark_subcommands.add_parser("validate", help="validate a benchmark suite")
+    benchmark_validate_parser.add_argument("suite", type=Path)
+    benchmark_validate_parser.set_defaults(handler=cmd_benchmark_validate)
+
+    benchmark_show_parser = benchmark_subcommands.add_parser("show", help="show benchmark suite metadata")
+    benchmark_show_parser.add_argument("suite", type=Path)
+    benchmark_show_parser.add_argument("--json", action="store_true", help="print machine-readable suite metadata")
+    benchmark_show_parser.set_defaults(handler=cmd_benchmark_show)
 
     return parser
 
@@ -241,6 +254,24 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark_validate(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    suite = validate_benchmark_suite(root, args.suite)
+    print(f"Benchmark suite valid: {suite.suite_id} ({len(suite.tasks)} task(s))")
+    return 0
+
+
+def cmd_benchmark_show(args: argparse.Namespace) -> int:
+    root = GitClient(Path.cwd()).ensure_repo()
+    suite = validate_benchmark_suite(root, args.suite)
+    if args.json:
+        print(json.dumps(suite.to_dict(), indent=2, ensure_ascii=False))
+        return 0
+
+    _print_benchmark_suite(suite.to_dict())
+    return 0
+
+
 def _print_summary(summary) -> None:
     print(f"Task: {summary.task_id}")
     print(f"Status: {summary.status}")
@@ -317,6 +348,30 @@ def _print_quality_report(report: dict[str, object]) -> None:
         print(f"Commit: {report.get('commit_hash')}")
     for note in notes:
         print(f"- {note}")
+
+
+def _print_benchmark_suite(suite: dict[str, object]) -> None:
+    tasks = suite.get("tasks") if isinstance(suite.get("tasks"), list) else []
+    metrics = suite.get("metrics") if isinstance(suite.get("metrics"), list) else []
+    print(f"Benchmark suite: {suite.get('suite_id')}")
+    print(f"Title: {suite.get('title')}")
+    print(f"Version: {suite.get('version')}")
+    description = suite.get("description")
+    if description:
+        print(f"Description: {description}")
+    print(f"Tasks: {len(tasks)}")
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        tags = task.get("tags") if isinstance(task.get("tags"), list) else []
+        tag_text = ",".join(str(tag) for tag in tags) if tags else "-"
+        print(
+            f"  {task.get('task_id')}  {task.get('path')}  "
+            f"category={task.get('category')}  difficulty={task.get('difficulty')}  "
+            f"weight={task.get('weight')}  tags={tag_text}"
+        )
+    if metrics:
+        print(f"Metrics: {', '.join(str(metric) for metric in metrics)}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+{
+  "suite_id": "apos-fast-track-0.1",
+  "title": "APOS Fast Track 0.1 Benchmark",
+  "description": "A small benchmark suite for comparing APOS task execution speed, reliability, and quality.",
+  "version": "0.1",
+  "metrics": [
+    "quality.score",
+    "status",
+    "attempts",
+    "tests.failed",
+    "rollbacks.failed"
+  ],
+  "tasks": [
+    {
+      "task_id": "TASK-002",
+      "path": "tasks/task-002-greeting.json",
+      "category": "code-change",
+      "difficulty": "easy",
+      "weight": 1,
+      "expected_minutes": 5,
+      "tags": [
+        "python",
+        "unit-test",
+        "single-file"
+      ]
+    }
+  ]
+}

@@ -88,6 +88,16 @@ Use `--json` with these commands when another tool needs structured run data.
 The report command produces a compact quality summary with status, attempts,
 test counts, rollback counts, commit information, and a deterministic score.
 
+## Benchmark suites
+
+```bash
+apos benchmark validate examples/benchmarks/fast-track-suite.json
+apos benchmark show examples/benchmarks/fast-track-suite.json
+```
+
+A benchmark suite groups TaskSpec files with comparison metadata such as
+category, difficulty, weight, tags, and metrics.
+
 ## TaskSpec shape
 
 ```json
