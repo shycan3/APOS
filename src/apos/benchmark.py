@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shlex
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
@@ -403,9 +404,11 @@ def _comparison_entry(result: dict[str, object], input_order: int) -> dict[str, 
 
 def _runner_profile(root: Path, options: BenchmarkRunOptions) -> dict[str, object]:
     model, binary, host = configured_ollama(root)
+    coder_command = options.coder_command or configured_coder_command(root)
+    model = model or _infer_ollama_model_from_command(coder_command)
     return {
         "apos_version": __version__,
-        "coder_command": options.coder_command or configured_coder_command(root),
+        "coder_command": coder_command,
         "ollama": {
             "model": model,
             "binary": binary,
@@ -422,6 +425,21 @@ def _runner_profile(root: Path, options: BenchmarkRunOptions) -> dict[str, objec
             "denied_permissions": list(options.denied_permissions),
         },
     }
+
+
+def _infer_ollama_model_from_command(command: str | None) -> str | None:
+    if not command:
+        return None
+    try:
+        parts = shlex.split(command, posix=False)
+    except ValueError:
+        parts = command.split()
+    for index, part in enumerate(parts):
+        if part == "--model" and index + 1 < len(parts):
+            return parts[index + 1].strip('"')
+        if part.startswith("--model="):
+            return part.split("=", 1)[1].strip('"')
+    return None
 
 
 def _write_json(path: Path, data: object) -> None:

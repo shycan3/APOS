@@ -9,6 +9,7 @@ from apos.benchmark import (
     BenchmarkError,
     BenchmarkRunOptions,
     BenchmarkSuite,
+    _infer_ollama_model_from_command,
     compare_benchmark_results,
     list_benchmark_results,
     load_benchmark_result,
@@ -51,6 +52,16 @@ class BenchmarkSuiteTests(unittest.TestCase):
                     ],
                 }
             )
+
+    def test_infers_ollama_model_from_coder_command(self):
+        self.assertEqual(
+            _infer_ollama_model_from_command("python -m apos.ollama --model qwen2.5-coder:7b --ollama-binary ollama"),
+            "qwen2.5-coder:7b",
+        )
+        self.assertEqual(
+            _infer_ollama_model_from_command('python -m apos.ollama --model="deepseek-coder:6.7b"'),
+            "deepseek-coder:6.7b",
+        )
 
     def test_validates_taskspec_paths_and_cli(self):
         with tempfile.TemporaryDirectory() as tmp:
