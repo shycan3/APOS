@@ -1,7 +1,7 @@
 {
   "task_id": "TASK-003",
   "title": "Normalize URL slugs",
-  "goal": "Update sandbox/text_app/slug.py so slugify(title) returns a URL-safe lowercase slug with punctuation removed and repeated separators collapsed.",
+  "goal": "Update sandbox/text_app/slug.py so slugify(title) returns a URL-safe lowercase slug where every run of non-alphanumeric characters becomes one hyphen.",
   "allowed_files": [
     "sandbox/text_app/slug.py"
   ],
@@ -14,7 +14,9 @@
     "Keep the function signature as slugify(title: str) -> str."
   ],
   "expected_behavior": [
-    "slugify(\" Hello, APOS 1.0! \") returns \"hello-apos-1-0\""
+    "slugify(\" Hello, APOS 1.0! \") returns \"hello-apos-1-0\"",
+    "Leading and trailing separators are removed.",
+    "Repeated separators are collapsed to one hyphen."
   ],
   "test_commands": [
     "python sandbox/text_app/check_slug.py"
