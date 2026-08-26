@@ -17,6 +17,7 @@ APOS 0.1 focuses on one reliable task loop:
 - roll back failed attempt patches before retrying
 - commit successful task results
 - write inspectable run logs under `.apos/runs/`
+- list and inspect run logs with `apos runs list` and `apos runs show`
 
 ## Rules
 

@@ -76,6 +76,15 @@ including the TaskSpec, attempt prompts, coder responses, test results, and
 final summary. APOS automatically excludes `.apos/runs/` from Git tracking for
 the local repository.
 
+## Inspect runs
+
+```bash
+apos runs list
+apos runs show .apos/runs/task-001/20260826T010000Z-abc12345
+```
+
+Use `--json` with either command when another tool needs structured run data.
+
 ## TaskSpec shape
 
 ```json
