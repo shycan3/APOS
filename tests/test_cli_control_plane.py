@@ -10,12 +10,14 @@ from apos.cli import main
 from apos.core import (
     Actor,
     ActorKind,
+    ApprovalAction,
+    ApprovalSource,
     Capability,
-    CommandPolicy,
-    Decision,
     ErrorCode,
+    PermissionRequest,
     ProjectRuntime,
-    StaticPermissionPolicy,
+    RiskLevel,
+    TaskState,
     ToolResult,
 )
 
@@ -57,7 +59,7 @@ class ValidateControlPlaneTests(unittest.TestCase):
         stdout = io.StringIO()
 
         with (
-            patch("apos.cli.ProjectRuntime.create", return_value=runtime) as create_runtime,
+            patch("apos.cli.ProjectRuntime.create_read_only", return_value=runtime) as create_runtime,
             patch("apos.cli.TaskSpec.load", side_effect=AssertionError("legacy loader called")),
             patch("apos.cli.Kernel", side_effect=AssertionError("legacy Kernel called")),
             patch("apos.cli.GitClient", side_effect=AssertionError("legacy GitClient called")),
@@ -74,6 +76,47 @@ class ValidateControlPlaneTests(unittest.TestCase):
         self.assertEqual(path, "task.json")
         self.assertEqual(actor, Actor(ActorKind.USER, "local-cli"))
         self.assertIn("TaskSpec 검증 완료", stdout.getvalue())
+
+    def test_validate_does_not_recover_an_unrelated_running_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "task.json").write_text(json.dumps(self._taskspec()), encoding="utf-8")
+            runtime = self._runtime(root)
+            task_actor = Actor(ActorKind.EXTERNAL_AI, "running-agent")
+            user = Actor(ActorKind.USER, "local-owner")
+            request = PermissionRequest.create(
+                project_id=runtime.workspace.project_id,
+                actor=task_actor,
+                capability=Capability.PROCESS_EXECUTE,
+                resource="trusted-python",
+                operation="execution.run",
+                risk_level=RiskLevel.HIGH,
+                metadata={"args_digest": "running-task"},
+                request_id="running-request",
+                task_id="running-task",
+            )
+            runtime.tasks.create_task(request, description="Concurrent running task")
+            runtime.tasks.queue_task("running-task", actor=task_actor)
+            runtime.tasks.request_approval("running-task", actor=task_actor)
+            approval = runtime.tasks.grant_approval(
+                "running-task",
+                action=ApprovalAction(
+                    request_id=request.request_id,
+                    request_digest=request.digest(),
+                    subject=task_actor,
+                    approved_by=user,
+                    source=ApprovalSource.UNAUTHENTICATED_USER_REQUEST,
+                    note="Explicit local approval for the running task.",
+                ),
+            )
+            self.assertTrue(runtime.tasks.consume_approval(request, approval.to_grant()).allowed)
+            self.assertEqual(runtime.tasks.get_task("running-task").state, TaskState.RUNNING)
+
+            with patch("apos.cli.Path.cwd", return_value=root), redirect_stdout(io.StringIO()):
+                return_code = main(["validate", "task.json"])
+
+            self.assertEqual(return_code, 0)
+            self.assertEqual(runtime.tasks.get_task("running-task").state, TaskState.RUNNING)
 
     def test_outside_project_path_fails_closed_and_is_audited(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,16 +167,27 @@ class ValidateControlPlaneTests(unittest.TestCase):
             self.assertIn("APOS 오류: INVALID_ARGUMENT:", stderr.getvalue())
             self.assertNotIn("Traceback", stderr.getvalue())
 
+    def test_cli_reports_runtime_initialization_failure_without_internal_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "task.json").write_text(json.dumps(self._taskspec()), encoding="utf-8")
+            state = root / ".apos" / "state"
+            state.mkdir(parents=True)
+            (state / "tasks.sqlite3").write_bytes(b"not-a-sqlite-database")
+            stderr = io.StringIO()
+
+            with patch("apos.cli.Path.cwd", return_value=root), redirect_stderr(stderr):
+                return_code = main(["validate", "task.json"])
+
+            error_output = stderr.getvalue()
+            self.assertEqual(return_code, 1)
+            self.assertIn("APOS 오류: PERSISTENCE_CORRUPTED:", error_output)
+            self.assertNotIn("Traceback", error_output)
+            self.assertNotIn(str(root.resolve()), error_output)
+
     @staticmethod
     def _runtime(root: Path) -> ProjectRuntime:
-        return ProjectRuntime.create(
-            root,
-            permission_policy=StaticPermissionPolicy(
-                {Capability.PROJECT_READ: Decision.ALLOW},
-                policy_id="test-validate-read-only-v1",
-            ),
-            command_policy=CommandPolicy.current_python(),
-        )
+        return ProjectRuntime.create_read_only(root)
 
     @staticmethod
     def _taskspec() -> dict[str, object]:

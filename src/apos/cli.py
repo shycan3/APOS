@@ -20,11 +20,9 @@ from .config import configured_coder_command, configured_ollama, ensure_project_
 from .core import (
     Actor,
     ActorKind,
-    Capability,
-    CommandPolicy,
-    Decision,
     ProjectRuntime,
-    StaticPermissionPolicy,
+    TaskError,
+    WorkspaceViolation,
 )
 from .draft import DraftError, draft_task_spec, refine_task_spec_with_ollama, write_task_spec
 from .evolution import (
@@ -200,6 +198,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return int(args.handler(args))
+    except (TaskError, WorkspaceViolation) as exc:
+        print(f"APOS 오류: {exc.code.value}: {exc}", file=sys.stderr)
+        return 1
     except (BenchmarkError, DraftError, EvolutionError, GitError, KernelError, SpecError) as exc:
         print(f"APOS 오류: {exc}", file=sys.stderr)
         return 1
@@ -487,14 +488,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    runtime = ProjectRuntime.create(
-        Path.cwd(),
-        permission_policy=StaticPermissionPolicy(
-            {Capability.PROJECT_READ: Decision.ALLOW},
-            policy_id="cli-validate-read-only-v1",
-        ),
-        command_policy=CommandPolicy.current_python(),
-    )
+    runtime = ProjectRuntime.create_read_only(Path.cwd())
     result = runtime.validation.validate(
         str(args.taskspec),
         actor=Actor(ActorKind.USER, "local-cli"),

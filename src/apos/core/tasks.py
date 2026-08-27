@@ -272,8 +272,8 @@ class SQLiteTaskRepository:
         self.path = candidate
 
     def initialize(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             with closing(self._connect()) as connection:
                 connection.execute("PRAGMA journal_mode=WAL")
                 connection.execute("PRAGMA synchronous=FULL")
@@ -298,6 +298,11 @@ class SQLiteTaskRepository:
             raise TaskError(
                 ErrorCode.PERSISTENCE_CORRUPTED,
                 f"task store is unreadable or corrupted: {exc}",
+            ) from exc
+        except OSError as exc:
+            raise TaskError(
+                ErrorCode.IO_ERROR,
+                f"task store initialization failed: {type(exc).__name__}",
             ) from exc
 
     def create(self, task: PersistentTask, request: PermissionRequest) -> PersistentTask:
@@ -1018,8 +1023,6 @@ class TaskService:
             human_approval_boundary or LocalUnauthenticatedHumanApprovalBoundary()
         )
         self._repository.initialize()
-        self._repository.recover_running(Actor(ActorKind.SYSTEM, "p0-3a-crash-recovery"))
-        self.flush_audit_events()
 
     def _bind_execution_service(self, execution_service: "ControlledExecutionService") -> None:
         """Bind the controlled executor once from the ProjectRuntime composition root."""
@@ -1029,6 +1032,15 @@ class TaskService:
         if execution_service.workspace.project_id != self.workspace.project_id:
             raise ValueError("execution service belongs to a different project")
         self._execution_service = execution_service
+
+    def recover_interrupted_tasks(self) -> tuple[PersistentTask, ...]:
+        """Recover RUNNING tasks at an explicit, dedicated task-owner startup boundary."""
+
+        recovered = self._repository.recover_running(
+            Actor(ActorKind.SYSTEM, "p0-3a-crash-recovery")
+        )
+        self.flush_audit_events()
+        return recovered
 
     def create_task(
         self,

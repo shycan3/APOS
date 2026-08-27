@@ -9,6 +9,7 @@ from apos.core import (
     Capability,
     CommandPolicy,
     Decision,
+    ErrorCode,
     ProjectRuntime,
     StaticPermissionPolicy,
     TaskService,
@@ -48,6 +49,21 @@ class ProjectRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(TypeError):
                 ProjectRuntime.create(Path(tmp))
+
+    def test_read_only_profile_allows_project_read_and_denies_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+            runtime = ProjectRuntime.create_read_only(root)
+            actor = Actor(ActorKind.USER, "local-cli")
+
+            read_result = runtime.filesystem.read_file("app.py", actor=actor)
+            write_result = runtime.filesystem.write_file("app.py", "VALUE = 2\n", actor=actor)
+
+            self.assertTrue(read_result.success, read_result.to_dict())
+            self.assertEqual(write_result.error.code, ErrorCode.PERMISSION_DENIED)
+            self.assertEqual((root / "app.py").read_text(encoding="utf-8"), "VALUE = 1\n")
+            self.assertEqual(runtime.permission_engine.policy.policy_id, "production-project-read-v1")
 
 
 if __name__ == "__main__":

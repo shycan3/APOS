@@ -191,6 +191,7 @@ class PersistentTaskTests(unittest.TestCase):
         restarted = TaskService(
             self.workspace, SQLiteTaskRepository(self.workspace), self.audit
         )
+        restarted.recover_interrupted_tasks()
         replay = restarted.consume_approval(request, grant)
 
         self.assertTrue(first.allowed)
@@ -404,18 +405,24 @@ class PersistentTaskTests(unittest.TestCase):
 
             self.assertEqual(corrupted.exception.code, ErrorCode.PERSISTENCE_CORRUPTED)
 
-    def test_running_task_recovers_without_automatic_execution(self):
+    def test_explicit_runtime_recovery_marks_running_task_without_automatic_execution(self):
         request = self._waiting()
         grant = self._approve(request).to_grant()
         self.assertTrue(self.tasks.consume_approval(request, grant).allowed)
 
-        restarted = TaskService(
-            self.workspace, SQLiteTaskRepository(self.workspace), self.audit
+        restarted = ProjectRuntime.create(
+            self.root,
+            permission_policy=StaticPermissionPolicy({}),
+            command_policy=CommandPolicy.current_python(),
         )
-        recovered = restarted.get_task("task-1")
+        self.assertEqual(restarted.tasks.get_task("task-1").state, TaskState.RUNNING)
 
+        recovered_tasks = restarted.recover_interrupted_tasks()
+        recovered = restarted.tasks.get_task("task-1")
+
+        self.assertEqual([task.task_id for task in recovered_tasks], ["task-1"])
         self.assertEqual(recovered.state, TaskState.RECOVERY_REQUIRED)
-        self.assertIsNotNone(restarted.get_approval("task-1").consumed_at)
+        self.assertIsNotNone(restarted.tasks.get_approval("task-1").consumed_at)
         recovery_events = [
             event
             for event in self.audit.events(request_id=request.request_id)

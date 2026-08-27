@@ -49,8 +49,8 @@ apos validate <project-relative-taskspec>
 
 The implemented path matches the target graph:
 
-1. `cmd_validate` creates one project-scoped `ProjectRuntime` rooted at the current working directory.
-2. The adapter installs an explicit static policy that allows only `PROJECT_READ`; every unspecified capability fails closed.
+1. `cmd_validate` requests the centralized `ProjectRuntime.create_read_only` production profile rooted at the current working directory.
+2. The reviewed runtime profile allows only `PROJECT_READ`; every unspecified capability fails closed. The CLI adapter does not define its own authority policy.
 3. The local CLI request is attributed to `USER:local-cli`. This is actor attribution, not authenticated human identity proof.
 4. `TaskSpecValidationService` asks `FileSystemService` to read the project-relative TaskSpec.
 5. `FileSystemService` applies workspace and secret-path checks, requests authorization, records the audit lifecycle, and returns a `ToolResult`.
@@ -64,6 +64,14 @@ This read-only operation is not persisted as a P0-3A task. Creating a durable ta
 The runtime still composes `TaskService` as its official persistent task control plane, but this slice relies on the explicit `PROJECT_READ=ALLOW` policy and request ID correlation. It does not fabricate a persistent task ID or an approval grant.
 
 Authenticated human identity remains unimplemented. The `USER:local-cli` actor means only that the local CLI adapter originated the request.
+
+## Runtime And Recovery Lifecycle
+
+Generic `ProjectRuntime` and `TaskService` construction initializes and wires the persistent repository but does not recover or otherwise transition existing tasks. This makes runtime composition safe for an unrelated read-only command.
+
+Crash recovery remains available through the explicit `ProjectRuntime.recover_interrupted_tasks` authority boundary. A dedicated task execution owner calls this operation during its controlled startup, after it has determined that recorded `RUNNING` tasks belong to an interrupted prior execution lifecycle. The operation transitions those tasks to `RECOVERY_REQUIRED` and flushes their persistent outbox events to the audit log.
+
+P0-3A does not yet provide authenticated owner identity or an OS-enforced single-owner lease. The explicit method separates recovery authority from generic construction without claiming those later guarantees.
 
 ## Project Boundary
 
@@ -85,6 +93,10 @@ On success, `TaskSpecValidationService.validate` returns a `ToolResult` containi
 
 Project-boundary, authorization, filesystem, decoding, JSON, and TaskSpec schema failures remain structured `ToolResult` failures. The CLI exposes them through its established one-line `APOS 오류` behavior rather than a raw traceback.
 
+Expected runtime initialization failures represented by `TaskError` or `WorkspaceViolation` also terminate through a stable error code and one-line CLI message. Programmer errors are not caught by this domain-error boundary.
+
+The audit lifecycle in this slice records the privileged filesystem operation. A JSON or TaskSpec schema rejection occurs after an authorized read and is returned as a structured validation error, but no separate non-privileged validation outcome event is added. Command-level outcome correlation is deferred because adding a second audit operation is not required to secure the project read and would expand this review fix beyond its purpose.
+
 ## Security And Architecture Verification
 
 The regression tests verify behavior rather than relying only on source-string inspection:
@@ -94,6 +106,10 @@ The regression tests verify behavior rather than relying only on source-string i
 - the TaskSpec bytes remain unchanged;
 - a path outside the project returns `PATH_OUTSIDE_PROJECT` and records `REQUESTED`, `DENIED`;
 - invalid JSON returns a structured `INVALID_ARGUMENT` result after an authorized and audited read;
+- an unrelated persistent task remains `RUNNING` when the real production validate command creates its read-only runtime;
+- `RUNNING` tasks transition to `RECOVERY_REQUIRED` only when the explicit runtime recovery authority is invoked;
+- a corrupted task store returns a stable non-zero CLI error without traceback or absolute project-path disclosure;
+- the centralized read-only profile allows project reads while denying project writes;
 - spies fail the test if the adapter calls `TaskSpec.load`, `Kernel`, `GitClient`, or direct `subprocess.run`.
 
 ## Explicit Non-Scope

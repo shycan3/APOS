@@ -6,9 +6,17 @@ from pathlib import Path
 from .audit import AuditLog, Redactor
 from .execution import CommandPolicy, ControlledExecutionService
 from .filesystem import FileSystemService
-from .permissions import AuthorizationService, PermissionEngine, PermissionPolicy
+from .permissions import (
+    AuthorizationService,
+    Capability,
+    Decision,
+    PermissionEngine,
+    PermissionPolicy,
+    StaticPermissionPolicy,
+)
 from .tasks import (
     HumanApprovalBoundary,
+    PersistentTask,
     SQLiteTaskRepository,
     TaskService,
 )
@@ -30,6 +38,19 @@ class ProjectRuntime:
     tools: ToolRegistry
     tasks: TaskService
     validation: TaskSpecValidationService
+
+    @classmethod
+    def create_read_only(cls, root: Path) -> "ProjectRuntime":
+        """Create the reviewed production profile for project-visible read operations."""
+
+        return cls.create(
+            root,
+            permission_policy=StaticPermissionPolicy(
+                {Capability.PROJECT_READ: Decision.ALLOW},
+                policy_id="production-project-read-v1",
+            ),
+            command_policy=CommandPolicy.current_python(),
+        )
 
     @classmethod
     def create(
@@ -71,3 +92,8 @@ class ProjectRuntime:
             tasks=tasks,
             validation=validation,
         )
+
+    def recover_interrupted_tasks(self) -> tuple[PersistentTask, ...]:
+        """Explicit recovery authority for a dedicated task execution owner at startup."""
+
+        return self.tasks.recover_interrupted_tasks()
