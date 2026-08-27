@@ -13,7 +13,10 @@ from .execution import (
 from .permissions import (
     Actor,
     ActorKind,
+    ApprovalConsumptionResult,
+    ApprovalConsumer,
     ApprovalGrant,
+    ApprovalSource,
     AuthorizationRecord,
     AuthorizationService,
     Capability,
@@ -26,13 +29,30 @@ from .permissions import (
 )
 from .result import ErrorCode, ToolError, ToolResult
 from .runtime import ProjectRuntime
+from .tasks import (
+    ApprovalAction,
+    HumanApprovalBoundary,
+    LocalUnauthenticatedHumanApprovalBoundary,
+    PersistentApproval,
+    PersistentTask,
+    SQLiteTaskRepository,
+    TaskError,
+    TaskRepository,
+    TaskService,
+    TaskState,
+    TaskStateMachine,
+)
 from .tools import ToolDefinition, ToolRegistry, core_tool_registry
 from .workspace import ProjectWorkspace, SecretPolicy, WorkspaceViolation
 
 __all__ = [
     "Actor",
     "ActorKind",
+    "ApprovalAction",
+    "ApprovalConsumptionResult",
+    "ApprovalConsumer",
     "ApprovalGrant",
+    "ApprovalSource",
     "AuthorizationRecord",
     "AuthorizationService",
     "AuditEvent",
@@ -46,9 +66,13 @@ __all__ = [
     "ErrorCode",
     "EnvironmentSanitizer",
     "FileSystemService",
+    "HumanApprovalBoundary",
+    "LocalUnauthenticatedHumanApprovalBoundary",
     "PermissionDecision",
     "PermissionEngine",
     "PermissionRequest",
+    "PersistentApproval",
+    "PersistentTask",
     "ProjectWorkspace",
     "ProjectRuntime",
     "NetworkPolicy",
@@ -56,11 +80,17 @@ __all__ = [
     "RiskLevel",
     "ResourceLimits",
     "SecretPolicy",
+    "SQLiteTaskRepository",
     "StaticPermissionPolicy",
     "ToolError",
     "ToolDefinition",
     "ToolRegistry",
     "ToolResult",
+    "TaskError",
+    "TaskRepository",
+    "TaskService",
+    "TaskState",
+    "TaskStateMachine",
     "core_tool_registry",
     "WorkspaceViolation",
 ]

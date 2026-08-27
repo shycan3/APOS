@@ -130,6 +130,7 @@ class AuditLog:
     def record(
         self,
         *,
+        event_id: str | None = None,
         actor: dict[str, str],
         operation: str,
         capability: str,
@@ -146,7 +147,7 @@ class AuditLog:
         parent_event_id: str | None = None,
     ) -> AuditEvent:
         event = AuditEvent(
-            event_id=uuid4().hex,
+            event_id=event_id or uuid4().hex,
             timestamp=datetime.now(timezone.utc).isoformat(),
             project_id=self.workspace.project_id,
             actor=self.redactor.redact(actor),
@@ -167,6 +168,10 @@ class AuditLog:
         serialized = json.dumps(event.to_dict(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            if event_id is not None and self.path.exists():
+                marker = f'"event_id":"{event.event_id}"'
+                if any(marker in line for line in self.path.read_text(encoding="utf-8").splitlines()):
+                    return event
             with self.path.open("a", encoding="utf-8", newline="\n") as stream:
                 stream.write(serialized + "\n")
                 stream.flush()

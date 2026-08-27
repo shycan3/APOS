@@ -47,6 +47,13 @@ class Decision(str, Enum):
     APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
 
 
+class ApprovalSource(str, Enum):
+    UNAUTHENTICATED_USER_REQUEST = "UNAUTHENTICATED_USER_REQUEST"
+    AUTHENTICATED_HUMAN = "AUTHENTICATED_HUMAN"
+    SYSTEM = "SYSTEM"
+    AI = "AI"
+
+
 @dataclass(frozen=True)
 class Actor:
     kind: ActorKind
@@ -123,14 +130,51 @@ class ApprovalGrant:
     request_digest: str
     approved_by: Actor
     note: str
+    grant_id: str | None = None
+    approval_source: ApprovalSource = ApprovalSource.UNAUTHENTICATED_USER_REQUEST
+    authenticated: bool = False
+    issued_at: str | None = None
+    expires_at: str | None = None
 
     def __post_init__(self) -> None:
         if self.approved_by.kind not in {ActorKind.USER, ActorKind.SYSTEM}:
             raise ValueError("approval grants must be issued by a USER or SYSTEM actor")
+        if self.approval_source in {
+            ApprovalSource.UNAUTHENTICATED_USER_REQUEST,
+            ApprovalSource.AUTHENTICATED_HUMAN,
+        } and self.approved_by.kind != ActorKind.USER:
+            raise ValueError("human approval sources require a USER approver")
+        if self.approval_source == ApprovalSource.SYSTEM and self.approved_by.kind != ActorKind.SYSTEM:
+            raise ValueError("SYSTEM approval source requires a SYSTEM approver")
+        if self.approval_source == ApprovalSource.AI:
+            raise ValueError("AI approval grants are never trusted")
+        if self.approval_source == ApprovalSource.AUTHENTICATED_HUMAN and not self.authenticated:
+            raise ValueError("authenticated human approval requires identity proof")
+        if self.approval_source != ApprovalSource.AUTHENTICATED_HUMAN and self.authenticated:
+            raise ValueError("only AUTHENTICATED_HUMAN grants may be marked authenticated")
         if not self.note.strip():
             raise ValueError("approval note is required")
         if len(self.request_digest) != 64:
             raise ValueError("approval request_digest must be a SHA-256 digest")
+
+
+@dataclass(frozen=True)
+class ApprovalConsumptionResult:
+    allowed: bool
+    reason: str
+    error_code: ErrorCode | None = None
+
+
+class ApprovalConsumer(Protocol):
+    def requires_persistent_approval(self, request: PermissionRequest) -> bool:
+        ...
+
+    def consume_approval(
+        self,
+        request: PermissionRequest,
+        approval: ApprovalGrant,
+    ) -> ApprovalConsumptionResult:
+        ...
 
 
 @dataclass(frozen=True)
@@ -171,8 +215,14 @@ class StaticPermissionPolicy:
 class PermissionEngine:
     """The sole authority for capability decisions in the new APOS core."""
 
-    def __init__(self, policy: PermissionPolicy) -> None:
+    def __init__(
+        self,
+        policy: PermissionPolicy,
+        *,
+        approval_consumer: ApprovalConsumer | None = None,
+    ) -> None:
         self.policy = policy
+        self.approval_consumer = approval_consumer
         self._consumed_approvals: set[tuple[str, str]] = set()
         self._approval_lock = threading.Lock()
 
@@ -201,7 +251,28 @@ class PermissionEngine:
                 decision.policy_id,
                 ErrorCode.POLICY_EVALUATION_FAILED,
             )
-        if decision.decision != Decision.APPROVAL_REQUIRED or approval is None:
+        persistent_required = False
+        if self.approval_consumer is not None:
+            try:
+                persistent_required = self.approval_consumer.requires_persistent_approval(request)
+            except Exception as exc:
+                return PermissionDecision(
+                    Decision.DENY,
+                    request.capability,
+                    f"persistent approval lookup failed: {type(exc).__name__}",
+                    decision.policy_id,
+                    ErrorCode.POLICY_EVALUATION_FAILED,
+                )
+        if decision.decision == Decision.DENY:
+            return decision
+        if approval is None:
+            if persistent_required:
+                return PermissionDecision(
+                    Decision.APPROVAL_REQUIRED,
+                    request.capability,
+                    "persistent task approval is required",
+                    decision.policy_id,
+                )
             return decision
         if (
             approval.request_id != request.request_id
@@ -214,6 +285,33 @@ class PermissionEngine:
                 "approval grant does not match this request",
                 decision.policy_id,
                 ErrorCode.PERMISSION_DENIED,
+            )
+        if self.approval_consumer is not None and (
+            persistent_required or decision.decision == Decision.APPROVAL_REQUIRED or approval.grant_id
+        ):
+            try:
+                consumption = self.approval_consumer.consume_approval(request, approval)
+            except Exception as exc:
+                return PermissionDecision(
+                    Decision.DENY,
+                    request.capability,
+                    f"persistent approval consumption failed: {type(exc).__name__}",
+                    decision.policy_id,
+                    ErrorCode.POLICY_EVALUATION_FAILED,
+                )
+            if not consumption.allowed:
+                return PermissionDecision(
+                    Decision.DENY,
+                    request.capability,
+                    consumption.reason,
+                    decision.policy_id,
+                    consumption.error_code or ErrorCode.PERMISSION_DENIED,
+                )
+            return PermissionDecision(
+                Decision.ALLOW,
+                request.capability,
+                consumption.reason,
+                decision.policy_id,
             )
         approval_key = (approval.project_id, approval.request_id)
         with self._approval_lock:
