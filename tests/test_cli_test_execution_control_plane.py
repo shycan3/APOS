@@ -157,7 +157,7 @@ class RunTestExecutionControlPlaneTests(unittest.TestCase):
             self.assertEqual(return_code, 1)
             self.assertFalse(marker.exists())
             self.assertIn("no Local Coder command configured", stderr.getvalue())
-            self.assertEqual([row[0] for row in task_rows], [TaskState.CANCELLED.value])
+            self.assertEqual([row[0] for row in task_rows], [TaskState.FAILED.value])
             self.assertEqual(
                 [event["status"] for event in execution_events],
                 ["REQUESTED", "DENIED"],
@@ -312,6 +312,36 @@ class RunTestExecutionControlPlaneTests(unittest.TestCase):
 
             self.assertEqual(results[0].error_type, "TASK_PERSISTENCE_FAILED")
             self.assertFalse(marker.exists())
+
+    def test_execution_exception_after_approval_consumption_requires_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = ProjectRuntime.create_local_test_execution(root)
+            actor = Actor(ActorKind.USER, "local-cli")
+            session = runtime.test_execution.bind(actor=actor, approved_by=actor)
+            command = subprocess.list2cmdline(
+                [sys.executable, "-c", "print('result unknown')"]
+            )
+
+            def consume_then_raise(request, *, approval=None, network_approval=None):
+                self.assertIsNotNone(approval)
+                permission_request = runtime.tasks.get_permission_request(request.task_id)
+                consumed = runtime.tasks.consume_approval(permission_request, approval)
+                self.assertTrue(consumed.allowed, consumed.reason)
+                raise RuntimeError("simulated audit persistence failure")
+
+            with patch.object(runtime.execution, "run", side_effect=consume_then_raise):
+                results = session.run_commands(
+                    [command],
+                    cwd=root,
+                    timeout_seconds=10,
+                    task_id="TASK-UNKNOWN-RESULT",
+                )
+
+            task_rows, approval_rows = self._task_rows(root)
+            self.assertEqual(results[0].error_type, ErrorCode.INTERNAL_ERROR.value)
+            self.assertEqual([row[0] for row in task_rows], [TaskState.RECOVERY_REQUIRED.value])
+            self.assertIsNotNone(approval_rows[0][0])
 
     @staticmethod
     def _production_run_guards(root: Path):

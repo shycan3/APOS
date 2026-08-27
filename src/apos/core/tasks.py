@@ -21,7 +21,7 @@ from .permissions import (
     PermissionRequest,
     RiskLevel,
 )
-from .result import ErrorCode
+from .result import ErrorCode, ToolResult
 from .workspace import ProjectWorkspace
 
 if TYPE_CHECKING:
@@ -57,7 +57,9 @@ class TaskStateMachine:
         TaskState.WAITING_APPROVAL: frozenset(
             {TaskState.APPROVED, TaskState.CANCELLED, TaskState.EXPIRED}
         ),
-        TaskState.APPROVED: frozenset({TaskState.RUNNING, TaskState.CANCELLED, TaskState.EXPIRED}),
+        TaskState.APPROVED: frozenset(
+            {TaskState.RUNNING, TaskState.FAILED, TaskState.CANCELLED, TaskState.EXPIRED}
+        ),
         TaskState.RUNNING: frozenset(
             {
                 TaskState.SUCCEEDED,
@@ -1223,11 +1225,36 @@ class TaskService:
         if task.approval_grant_id is None:
             raise TaskError(ErrorCode.APPROVAL_NOT_FOUND, "task has no approval")
         approval = self._repository.get_approval(task.approval_grant_id)
-        result = self._execution_service.run(
-            request,
-            approval=approval.to_grant(),
-            network_approval=network_approval,
-        )
+        try:
+            result = self._execution_service.run(
+                request,
+                approval=approval.to_grant(),
+                network_approval=network_approval,
+            )
+        except Exception as exc:
+            current = self._repository.get_task(task.task_id)
+            failure = {
+                "error_code": ErrorCode.INTERNAL_ERROR.value,
+                "message": f"controlled execution raised {type(exc).__name__}",
+            }
+            if current.state == TaskState.RUNNING:
+                self.mark_recovery_required(
+                    task.task_id,
+                    actor=task.actor,
+                    reason="controlled execution result is unknown after approval consumption",
+                )
+            elif current.state == TaskState.APPROVED:
+                self.complete_task(
+                    task.task_id,
+                    actor=task.actor,
+                    succeeded=False,
+                    failure_information=failure,
+                )
+            return ToolResult.fail(
+                ErrorCode.INTERNAL_ERROR,
+                "controlled execution failed before returning a result",
+                details=failure,
+            )
         current = self._repository.get_task(task.task_id)
         if current.state == TaskState.RUNNING:
             if result.success:
@@ -1250,6 +1277,24 @@ class TaskService:
                     },
                 )
         return result
+
+    def mark_recovery_required(
+        self,
+        task_id: str,
+        *,
+        actor: Actor,
+        reason: str,
+    ) -> PersistentTask:
+        self._require_subject(task_id, actor)
+        changed = self._repository.transition(
+            task_id,
+            TaskState.RECOVERY_REQUIRED,
+            actor=actor,
+            event_types=("TASK_RECOVERY_REQUIRED",),
+            failure_information={"reason": self.redactor.redact_text(reason)},
+        )
+        self.flush_audit_events()
+        return changed
 
     def complete_task(
         self,

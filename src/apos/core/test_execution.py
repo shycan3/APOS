@@ -155,10 +155,14 @@ class TestExecutionSession:
 
         current = self.service.tasks.get_task(execution_task_id)
         if not result.success and current.state == TaskState.APPROVED:
-            self.service.tasks.cancel_task(
+            self.service.tasks.complete_task(
                 execution_task_id,
                 actor=self.actor,
-                reason=result.error.message if result.error else "test execution denied",
+                succeeded=False,
+                failure_information={
+                    "error_code": result.error.code.value if result.error else "INTERNAL_ERROR",
+                    "message": result.error.message if result.error else "test execution failed",
+                },
             )
         return self._from_tool_result(command, result)
 
