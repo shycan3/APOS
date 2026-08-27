@@ -1,0 +1,6 @@
+{
+  "protocol":"APOS v3.1 Risk Queue",
+  "max_queue_limit":5,
+  "overflow_policy":"archive_resolved_then_request_approval",
+  "active_pending_risks":[]
+}

@@ -1,0 +1,3 @@
+# Scratchpad
+
+Temporary notes only.
