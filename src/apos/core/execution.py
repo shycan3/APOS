@@ -24,6 +24,7 @@ from .permissions import (
     AuthorizationService,
     Capability,
     Decision,
+    PermissionRequest,
     RiskLevel,
 )
 from .result import ErrorCode, ToolResult
@@ -81,6 +82,32 @@ class CommandAssessment:
     allowed: bool
     reason: str
     error_code: ErrorCode | None = None
+
+
+@dataclass(frozen=True)
+class PreparedCommand:
+    """Canonical command assessment and permission request used by task execution."""
+
+    operation: str
+    normalized_cwd: str
+    cwd: Path
+    assessment: CommandAssessment
+    permission_request: PermissionRequest
+
+
+class CommandPreparationError(ValueError):
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        resource: str,
+        risk_level: RiskLevel,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.resource = resource
+        self.risk_level = risk_level
 
 
 class CommandPolicy:
@@ -251,38 +278,32 @@ class ControlledExecutionService:
         self._terminate_process_tree(process)
         return True
 
-    def run(
-        self,
-        request: CommandRequest,
-        *,
-        approval: ApprovalGrant | None = None,
-        network_approval: ApprovalGrant | None = None,
-    ) -> ToolResult[dict[str, Any]]:
-        operation = "test.run" if request.capability == Capability.TEST_EXECUTE else "execution.run"
-        try:
-            normalized_cwd, cwd = self.workspace.resolve(request.cwd, allow_root=True, must_exist=True)
-        except WorkspaceViolation as exc:
-            return self._reject(
-                request, operation, exc.code, str(exc), resource=request.cwd or ".", risk=RiskLevel.HIGH
-            )
+    def prepare(self, request: CommandRequest) -> PreparedCommand:
+        """Build the exact permission request persisted before process launch."""
+
+        operation = self._operation(request)
+        normalized_cwd, cwd = self.workspace.resolve(
+            request.cwd, allow_root=True, must_exist=True
+        )
         if not cwd.is_dir():
-            return self._reject(
-                request, operation, ErrorCode.WORKING_DIRECTORY_INVALID,
-                "working directory is not a directory", resource=normalized_cwd or ".", risk=RiskLevel.HIGH,
+            raise CommandPreparationError(
+                ErrorCode.WORKING_DIRECTORY_INVALID,
+                "working directory is not a directory",
+                resource=normalized_cwd or ".",
+                risk_level=RiskLevel.HIGH,
             )
 
         assessment = self.command_policy.assess(request)
         if not assessment.allowed or assessment.executable is None:
-            return self._reject(
-                request, operation, assessment.error_code or ErrorCode.COMMAND_NOT_ALLOWED,
-                assessment.reason, resource=request.executable, risk=assessment.risk_level,
+            raise CommandPreparationError(
+                assessment.error_code or ErrorCode.COMMAND_NOT_ALLOWED,
+                assessment.reason,
+                resource=request.executable,
+                risk_level=assessment.risk_level,
             )
 
-        self.authorization.audit_log.redactor.add_secret_values(
-            self.environment_sanitizer.secret_values(request.environment)
-        )
-
-        authorization = self.authorization.authorize(
+        permission_request = PermissionRequest.create(
+            project_id=self.workspace.project_id,
             actor=request.actor,
             capability=request.capability,
             resource=str(assessment.executable),
@@ -302,6 +323,48 @@ class ControlledExecutionService:
             },
             request_id=request.request_id,
             task_id=request.task_id,
+        )
+        return PreparedCommand(
+            operation=operation,
+            normalized_cwd=normalized_cwd,
+            cwd=cwd,
+            assessment=assessment,
+            permission_request=permission_request,
+        )
+
+    def run(
+        self,
+        request: CommandRequest,
+        *,
+        approval: ApprovalGrant | None = None,
+        network_approval: ApprovalGrant | None = None,
+    ) -> ToolResult[dict[str, Any]]:
+        operation = self._operation(request)
+        try:
+            prepared = self.prepare(request)
+        except WorkspaceViolation as exc:
+            return self._reject(
+                request, operation, exc.code, str(exc), resource=request.cwd or ".", risk=RiskLevel.HIGH
+            )
+        except CommandPreparationError as exc:
+            return self._reject(
+                request,
+                operation,
+                exc.code,
+                str(exc),
+                resource=exc.resource,
+                risk=exc.risk_level,
+            )
+        normalized_cwd = prepared.normalized_cwd
+        cwd = prepared.cwd
+        assessment = prepared.assessment
+
+        self.authorization.audit_log.redactor.add_secret_values(
+            self.environment_sanitizer.secret_values(request.environment)
+        )
+
+        authorization = self.authorization.authorize_request(
+            prepared.permission_request,
             approval=approval,
         )
         denied = self._authorization_failure(authorization)
@@ -454,6 +517,10 @@ class ControlledExecutionService:
             return ToolResult.ok(result_data, meta=self._meta(authorization, finished))
         finally:
             self._project_lock.release()
+
+    @staticmethod
+    def _operation(request: CommandRequest) -> str:
+        return "test.run" if request.capability == Capability.TEST_EXECUTE else "execution.run"
 
     def _terminate_process_tree(self, process: subprocess.Popen[bytes]) -> None:
         if process.poll() is not None:

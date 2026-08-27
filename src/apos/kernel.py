@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable, Protocol
 
 from .coder import CommandPatchCoder, build_coder_prompt, summarize_failures
 from .config import configured_coder_command, load_config
 from .executor import run_commands
 from .git import GitClient, GitError
-from .models import AttemptResult, ContextRequest, PermissionSpec, RunSummary, TaskSpec
+from .models import AttemptResult, ContextRequest, ExecutionResult, PermissionSpec, RunSummary, TaskSpec
 from .pathing import PathPolicyError, normalize_project_path, project_path
 from .permissions import PermissionError, PermissionManager
 from .runlog import RunRecorder
@@ -16,6 +17,21 @@ from .runlog import RunRecorder
 
 class KernelError(RuntimeError):
     """Raised when APOS cannot complete the task loop."""
+
+
+class TestCommandRunner(Protocol):
+    def run_commands(
+        self,
+        commands: list[str],
+        *,
+        cwd: Path,
+        timeout_seconds: int,
+        task_id: str,
+    ) -> list[ExecutionResult]:
+        ...
+
+
+TestCommandRunnerFactory = Callable[[Path], TestCommandRunner]
 
 
 @dataclass(frozen=True)
@@ -31,9 +47,16 @@ class RunOptions:
 
 
 class Kernel:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        test_runner_factory: TestCommandRunnerFactory | None = None,
+    ) -> None:
         self.root = root.resolve()
         self.git = GitClient(self.root)
+        self.test_runner_factory = test_runner_factory
+        self.test_runner: TestCommandRunner | None = None
 
     def run_task(self, spec: TaskSpec, options: RunOptions) -> RunSummary:
         self.root = self.git.ensure_repo().resolve()
@@ -41,6 +64,8 @@ class Kernel:
         config = load_config(self.root)
         defaults = config.get("defaults", {})
 
+        if self.test_runner_factory is not None:
+            self.git.exclude_path(".apos/")
         dirty = self.git.status_porcelain()
         if dirty and not options.allow_dirty:
             raise KernelError("working tree is not clean; use --allow-dirty to override")
@@ -51,12 +76,18 @@ class Kernel:
             prefix=str(defaults.get("branch_prefix", "apos/task-")),
         )
         self.git.checkout_task_branch(branch)
-        self.git.exclude_path(".apos/runs/")
+        if self.test_runner_factory is None:
+            self.git.exclude_path(".apos/runs/")
         recorder = RunRecorder(self.root, spec, branch)
+        self.test_runner = (
+            self.test_runner_factory(self.root)
+            if self.test_runner_factory is not None
+            else None
+        )
 
         timeout = int(options.command_timeout_seconds or defaults.get("command_timeout_seconds", 120))
         max_attempts = int(options.max_attempts or spec.max_attempts or defaults.get("max_attempts", 3))
-        preflight_results = run_commands(spec.test_commands, cwd=self.root, timeout_seconds=timeout)
+        preflight_results = self._run_test_commands(spec, timeout)
         if all(result.passed for result in preflight_results):
             recorder.record_tests(0, preflight_results)
             attempt = AttemptResult(0, "PASS", "tests already passed before coder changes", preflight_results)
@@ -125,7 +156,7 @@ class Kernel:
                     previous_error = message
                     continue
 
-                test_results = run_commands(spec.test_commands, cwd=self.root, timeout_seconds=timeout)
+                test_results = self._run_test_commands(spec, timeout)
                 recorder.record_tests(attempt_number, test_results)
                 if all(result.passed for result in test_results):
                     attempt = AttemptResult(
@@ -185,7 +216,7 @@ class Kernel:
                 previous_error = message
                 continue
 
-            test_results = run_commands(spec.test_commands, cwd=self.root, timeout_seconds=timeout)
+            test_results = self._run_test_commands(spec, timeout)
             recorder.record_tests(attempt_number, test_results)
             if all(result.passed for result in test_results):
                 try:
@@ -224,6 +255,24 @@ class Kernel:
             recorder.record_attempt(attempt)
 
         return self._finish(recorder, RunSummary("FAILED", spec.task_id, branch, attempts))
+
+    def _run_test_commands(
+        self,
+        spec: TaskSpec,
+        timeout_seconds: int,
+    ) -> list[ExecutionResult]:
+        if self.test_runner is not None:
+            return self.test_runner.run_commands(
+                spec.test_commands,
+                cwd=self.root,
+                timeout_seconds=timeout_seconds,
+                task_id=spec.task_id,
+            )
+        return run_commands(
+            spec.test_commands,
+            cwd=self.root,
+            timeout_seconds=timeout_seconds,
+        )
 
     def _finish(self, recorder: RunRecorder, summary: RunSummary) -> RunSummary:
         summary_with_log = RunSummary(

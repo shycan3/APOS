@@ -377,15 +377,27 @@ class AuthorizationService:
             request_id=request_id,
             task_id=task_id,
         )
+        return self.authorize_request(request, approval=approval)
+
+    def authorize_request(
+        self,
+        request: PermissionRequest,
+        *,
+        approval: ApprovalGrant | None = None,
+    ) -> AuthorizationRecord:
+        """Authorize one pre-built request without changing its approval digest."""
+
+        if request.project_id != self.audit_log.workspace.project_id:
+            raise ValueError("permission request belongs to a different project")
         requested_event = self.audit_log.record(
-            actor=actor.to_dict(),
-            operation=operation,
-            capability=capability.value,
-            resource=resource,
+            actor=request.actor.to_dict(),
+            operation=request.operation,
+            capability=request.capability.value,
+            resource=request.resource,
             status=AuditStatus.REQUESTED,
             request_id=request.request_id,
-            metadata={"risk_level": risk_level.name, **dict(metadata or {})},
-            task_id=task_id,
+            metadata={"risk_level": request.risk_level.name, **dict(request.metadata)},
+            task_id=request.task_id,
         )
         decision = self.engine.evaluate(request, approval=approval)
         status = {
@@ -394,16 +406,16 @@ class AuthorizationService:
             Decision.APPROVAL_REQUIRED: AuditStatus.APPROVAL_REQUIRED,
         }[decision.decision]
         decision_event = self.audit_log.record(
-            actor=actor.to_dict(),
-            operation=operation,
-            capability=capability.value,
-            resource=resource,
+            actor=request.actor.to_dict(),
+            operation=request.operation,
+            capability=request.capability.value,
+            resource=request.resource,
             status=status,
             request_id=request.request_id,
             decision=decision.decision.value,
             error_code=decision.error_code.value if decision.error_code else None,
             metadata={"reason": decision.reason, "policy_id": decision.policy_id},
-            task_id=task_id,
+            task_id=request.task_id,
             parent_event_id=requested_event.event_id,
         )
         return AuthorizationRecord(request, decision, requested_event, decision_event)

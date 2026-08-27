@@ -576,7 +576,7 @@ def cmd_refine(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     root = Path.cwd()
     spec = TaskSpec.load(args.taskspec)
-    summary = Kernel(root).run_task(
+    summary = Kernel(root, test_runner_factory=_local_test_runner).run_task(
         spec,
         RunOptions(
             coder_command=args.coder_command,
@@ -594,6 +594,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     else:
         _print_summary(summary)
     return 0 if summary.status == "PASS" else 2
+
+
+def _local_test_runner(root: Path):
+    runtime = ProjectRuntime.create_local_test_execution(root)
+    actor = Actor(ActorKind.USER, "local-cli")
+    return runtime.test_execution.bind(actor=actor, approved_by=actor)
 
 
 def cmd_runs_list(args: argparse.Namespace) -> int:

@@ -20,6 +20,7 @@ from .tasks import (
     SQLiteTaskRepository,
     TaskService,
 )
+from .test_execution import TestExecutionService
 from .tools import ToolRegistry, core_tool_registry
 from .validation import TaskSpecValidationService
 from .workspace import ProjectWorkspace, SecretPolicy
@@ -37,6 +38,7 @@ class ProjectRuntime:
     execution: ControlledExecutionService
     tools: ToolRegistry
     tasks: TaskService
+    test_execution: TestExecutionService
     validation: TaskSpecValidationService
 
     @classmethod
@@ -48,6 +50,22 @@ class ProjectRuntime:
             permission_policy=StaticPermissionPolicy(
                 {Capability.PROJECT_READ: Decision.ALLOW},
                 policy_id="production-project-read-v1",
+            ),
+            command_policy=CommandPolicy.current_python(),
+        )
+
+    @classmethod
+    def create_local_test_execution(cls, root: Path) -> "ProjectRuntime":
+        """Create the local-only profile for persistent TaskSpec test execution."""
+
+        return cls.create(
+            root,
+            permission_policy=StaticPermissionPolicy(
+                {
+                    Capability.PROJECT_READ: Decision.ALLOW,
+                    Capability.TEST_EXECUTE: Decision.APPROVAL_REQUIRED,
+                },
+                policy_id="production-local-test-execution-v1",
             ),
             command_policy=CommandPolicy.current_python(),
         )
@@ -81,6 +99,7 @@ class ProjectRuntime:
         execution = ControlledExecutionService(workspace, authorization, command_policy)
         validation = TaskSpecValidationService(filesystem)
         tasks._bind_execution_service(execution)
+        test_execution = TestExecutionService(workspace, tasks, execution)
         return cls(
             workspace=workspace,
             permission_engine=permission_engine,
@@ -90,6 +109,7 @@ class ProjectRuntime:
             execution=execution,
             tools=core_tool_registry(),
             tasks=tasks,
+            test_execution=test_execution,
             validation=validation,
         )
 

@@ -40,6 +40,7 @@ from .tasks import (
     TaskState,
     TaskStateMachine,
 )
+from .test_execution import TestExecutionService, TestExecutionSession
 from .tools import ToolDefinition, ToolRegistry, core_tool_registry
 from .validation import TaskSpecValidationService
 from .workspace import ProjectWorkspace, SecretPolicy, WorkspaceViolation
@@ -85,6 +86,8 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "TaskError",
+    "TestExecutionService",
+    "TestExecutionSession",
     "TaskService",
     "TaskState",
     "TaskStateMachine",

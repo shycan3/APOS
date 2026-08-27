@@ -1075,6 +1075,27 @@ class TaskService:
         self.flush_audit_events()
         return created
 
+    def create_command_task(
+        self,
+        request: "CommandRequest",
+        *,
+        description: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> PersistentTask:
+        """Persist the canonical request prepared by the bound execution service."""
+
+        if self._execution_service is None:
+            raise TaskError(
+                ErrorCode.INTERNAL_ERROR,
+                "controlled execution service is not configured for this task service",
+            )
+        prepared = self._execution_service.prepare(request)
+        return self.create_task(
+            prepared.permission_request,
+            description=description,
+            metadata=metadata,
+        )
+
     def get_task(self, task_id: str) -> PersistentTask:
         return self._repository.get_task(task_id)
 
