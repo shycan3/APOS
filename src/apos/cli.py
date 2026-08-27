@@ -17,6 +17,7 @@ from .benchmark import (
     validate_benchmark_suite,
 )
 from .config import configured_coder_command, configured_ollama, ensure_project_memory, load_config, save_config
+from .controlled_git import ControlledGitClient
 from .core import (
     Actor,
     ActorKind,
@@ -576,7 +577,11 @@ def cmd_refine(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     root = Path.cwd()
     spec = TaskSpec.load(args.taskspec)
-    summary = Kernel(root, test_runner_factory=_local_test_runner).run_task(
+    summary = Kernel(
+        root,
+        test_runner_factory=_local_test_runner,
+        git_client_factory=_local_git_client,
+    ).run_task(
         spec,
         RunOptions(
             coder_command=args.coder_command,
@@ -600,6 +605,13 @@ def _local_test_runner(root: Path):
     runtime = ProjectRuntime.create_local_test_execution(root)
     actor = Actor(ActorKind.USER, "local-cli")
     return runtime.test_execution.bind(actor=actor, approved_by=actor)
+
+
+def _local_git_client(root: Path):
+    runtime = ProjectRuntime.create_local_git_phase_a(root)
+    actor = Actor(ActorKind.USER, "local-cli")
+    session = runtime.git_execution.bind(actor=actor, approved_by=actor)
+    return ControlledGitClient(root, session)
 
 
 def cmd_runs_list(args: argparse.Namespace) -> int:

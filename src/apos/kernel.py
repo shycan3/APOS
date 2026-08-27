@@ -32,6 +32,7 @@ class TestCommandRunner(Protocol):
 
 
 TestCommandRunnerFactory = Callable[[Path], TestCommandRunner]
+GitClientFactory = Callable[[Path], GitClient]
 
 
 @dataclass(frozen=True)
@@ -52,15 +53,17 @@ class Kernel:
         root: Path,
         *,
         test_runner_factory: TestCommandRunnerFactory | None = None,
+        git_client_factory: GitClientFactory | None = None,
     ) -> None:
         self.root = root.resolve()
-        self.git = GitClient(self.root)
+        self.git_client_factory = git_client_factory or GitClient
+        self.git = self.git_client_factory(self.root)
         self.test_runner_factory = test_runner_factory
         self.test_runner: TestCommandRunner | None = None
 
     def run_task(self, spec: TaskSpec, options: RunOptions) -> RunSummary:
         self.root = self.git.ensure_repo().resolve()
-        self.git = GitClient(self.root)
+        self.git = self.git_client_factory(self.root)
         config = load_config(self.root)
         defaults = config.get("defaults", {})
 

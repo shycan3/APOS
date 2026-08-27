@@ -6,6 +6,7 @@ from pathlib import Path
 from .audit import AuditLog, Redactor
 from .execution import CommandPolicy, ControlledExecutionService
 from .filesystem import FileSystemService
+from .git_execution import GitExecutionService
 from .permissions import (
     AuthorizationService,
     Capability,
@@ -38,6 +39,7 @@ class ProjectRuntime:
     execution: ControlledExecutionService
     tools: ToolRegistry
     tasks: TaskService
+    git_execution: GitExecutionService
     test_execution: TestExecutionService
     validation: TaskSpecValidationService
 
@@ -71,6 +73,22 @@ class ProjectRuntime:
         )
 
     @classmethod
+    def create_local_git_phase_a(cls, root: Path) -> "ProjectRuntime":
+        """Create the local-only profile for production Git read and branch prep."""
+
+        return cls.create(
+            root,
+            permission_policy=StaticPermissionPolicy(
+                {
+                    Capability.GIT_READ: Decision.ALLOW,
+                    Capability.GIT_WORKTREE_WRITE: Decision.APPROVAL_REQUIRED,
+                },
+                policy_id="production-local-git-phase-a-v1",
+            ),
+            command_policy=CommandPolicy.current_git(),
+        )
+
+    @classmethod
     def create(
         cls,
         root: Path,
@@ -99,6 +117,7 @@ class ProjectRuntime:
         execution = ControlledExecutionService(workspace, authorization, command_policy)
         validation = TaskSpecValidationService(filesystem)
         tasks._bind_execution_service(execution)
+        git_execution = GitExecutionService(workspace, tasks, execution)
         test_execution = TestExecutionService(workspace, tasks, execution)
         return cls(
             workspace=workspace,
@@ -109,6 +128,7 @@ class ProjectRuntime:
             execution=execution,
             tools=core_tool_registry(),
             tasks=tasks,
+            git_execution=git_execution,
             test_execution=test_execution,
             validation=validation,
         )

@@ -67,8 +67,20 @@ class CommandRequest:
     def __post_init__(self) -> None:
         if not self.executable.strip():
             raise ValueError("executable is required")
-        if self.capability not in {Capability.PROCESS_EXECUTE, Capability.TEST_EXECUTE}:
-            raise ValueError("command capability must be PROCESS_EXECUTE or TEST_EXECUTE")
+        executable_capabilities = {
+            Capability.PROCESS_EXECUTE,
+            Capability.TEST_EXECUTE,
+            Capability.GIT_READ,
+            Capability.GIT_WRITE,
+            Capability.GIT_WORKTREE_WRITE,
+            Capability.GIT_INDEX_WRITE,
+            Capability.GIT_REF_WRITE,
+            Capability.GIT_ROLLBACK,
+            Capability.GIT_RESET,
+            Capability.GIT_PUSH,
+        }
+        if self.capability not in executable_capabilities:
+            raise ValueError("command capability is not executable")
         if not self.request_id.strip():
             raise ValueError("request_id is required")
         if not all(isinstance(argument, str) for argument in self.args):
@@ -132,6 +144,13 @@ class CommandPolicy:
     def current_python(cls) -> "CommandPolicy":
         return cls((Path(sys.executable),))
 
+    @classmethod
+    def current_git(cls) -> "CommandPolicy":
+        executable = shutil.which("git")
+        if executable is None:
+            raise ValueError("git executable is not available")
+        return cls((Path(executable),))
+
     def assess(self, request: CommandRequest) -> CommandAssessment:
         raw = request.executable.strip()
         if self._SHELL_META.search(raw):
@@ -159,8 +178,18 @@ class CommandPolicy:
         node_package_install = basename in {"npm", "npx"} and any(
             argument in {"install", "add", "update"} for argument in arguments
         )
-        explicit_network = basename in self._NETWORK_TOOLS or python_package_install or node_package_install or any(
+        git_network = basename == "git" and any(
+            argument in {"clone", "fetch", "pull", "push", "ls-remote", "remote", "submodule"}
+            for argument in arguments
+        )
+        explicit_network = (
+            (basename in self._NETWORK_TOOLS and basename != "git")
+            or git_network
+            or python_package_install
+            or node_package_install
+            or any(
             value.startswith(("http://", "https://")) for value in arguments
+            )
         )
         if explicit_network and request.network_policy == NetworkPolicy.DENIED:
             return CommandAssessment(candidate, RiskLevel.HIGH, False, "command explicitly requests network access", ErrorCode.NETWORK_ACCESS_DENIED)
@@ -520,7 +549,11 @@ class ControlledExecutionService:
 
     @staticmethod
     def _operation(request: CommandRequest) -> str:
-        return "test.run" if request.capability == Capability.TEST_EXECUTE else "execution.run"
+        if request.capability == Capability.TEST_EXECUTE:
+            return "test.run"
+        if request.capability.name.startswith("GIT_"):
+            return "git.run"
+        return "execution.run"
 
     def _terminate_process_tree(self, process: subprocess.Popen[bytes]) -> None:
         if process.poll() is not None:

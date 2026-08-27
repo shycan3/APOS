@@ -406,10 +406,23 @@ class RunTestExecutionControlPlaneTests(unittest.TestCase):
             sqlite3.connect(root / ".apos" / "state" / "tasks.sqlite3")
         ) as connection:
             tasks = connection.execute(
-                "SELECT state, requested_capability FROM tasks ORDER BY created_at, task_id"
+                """
+                SELECT state, requested_capability
+                FROM tasks
+                WHERE requested_capability = ?
+                ORDER BY created_at, task_id
+                """,
+                (Capability.TEST_EXECUTE.value,),
             ).fetchall()
             approvals = connection.execute(
-                "SELECT consumed_at FROM approvals ORDER BY issued_at, approval_id"
+                """
+                SELECT approvals.consumed_at
+                FROM approvals
+                JOIN tasks ON approvals.task_id = tasks.task_id
+                WHERE tasks.requested_capability = ?
+                ORDER BY approvals.issued_at, approvals.approval_id
+                """,
+                (Capability.TEST_EXECUTE.value,),
             ).fetchall()
         return tasks, approvals
 

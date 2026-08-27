@@ -2,6 +2,7 @@
 
 from .audit import AuditEvent, AuditLog, AuditStatus, Redactor
 from .filesystem import FileSystemService
+from .git_execution import GitExecutionError, GitExecutionService, GitExecutionSession, GitSnapshot
 from .execution import (
     CommandPolicy,
     CommandRequest,
@@ -66,6 +67,10 @@ __all__ = [
     "ErrorCode",
     "EnvironmentSanitizer",
     "FileSystemService",
+    "GitExecutionError",
+    "GitExecutionService",
+    "GitExecutionSession",
+    "GitSnapshot",
     "HumanApprovalBoundary",
     "LocalUnauthenticatedHumanApprovalBoundary",
     "PermissionDecision",

@@ -1201,6 +1201,7 @@ class TaskService:
         request: "CommandRequest",
         *,
         network_approval: ApprovalGrant | None = None,
+        close_on_result: bool = True,
     ):
         """Run through the runtime-bound controlled executor and close the task lifecycle."""
 
@@ -1256,7 +1257,7 @@ class TaskService:
                 details=failure,
             )
         current = self._repository.get_task(task.task_id)
-        if current.state == TaskState.RUNNING:
+        if close_on_result and current.state == TaskState.RUNNING:
             if result.success:
                 self.complete_task(task.task_id, actor=task.actor, succeeded=True)
             elif result.error is not None and result.error.code == ErrorCode.EXECUTION_CANCELLED:
