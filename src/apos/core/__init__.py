@@ -41,6 +41,7 @@ from .tasks import (
     TaskStateMachine,
 )
 from .tools import ToolDefinition, ToolRegistry, core_tool_registry
+from .validation import TaskSpecValidationService
 from .workspace import ProjectWorkspace, SecretPolicy, WorkspaceViolation
 
 __all__ = [
@@ -87,6 +88,7 @@ __all__ = [
     "TaskService",
     "TaskState",
     "TaskStateMachine",
+    "TaskSpecValidationService",
     "core_tool_registry",
     "WorkspaceViolation",
 ]

@@ -35,6 +35,7 @@ class ProjectRuntimeTests(unittest.TestCase):
             self.assertTrue(result.success, result.to_dict())
             self.assertEqual(runtime.workspace.project_id, runtime.audit_log.workspace.project_id)
             self.assertIsInstance(runtime.tasks, TaskService)
+            self.assertIs(runtime.validation.filesystem, runtime.filesystem)
             self.assertFalse(hasattr(runtime, "task_repository"))
             self.assertFalse(hasattr(runtime.tasks, "repository"))
             self.assertFalse(hasattr(core_api, "TaskRepository"))

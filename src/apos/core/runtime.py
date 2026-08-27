@@ -13,6 +13,7 @@ from .tasks import (
     TaskService,
 )
 from .tools import ToolRegistry, core_tool_registry
+from .validation import TaskSpecValidationService
 from .workspace import ProjectWorkspace, SecretPolicy
 
 
@@ -28,6 +29,7 @@ class ProjectRuntime:
     execution: ControlledExecutionService
     tools: ToolRegistry
     tasks: TaskService
+    validation: TaskSpecValidationService
 
     @classmethod
     def create(
@@ -56,6 +58,7 @@ class ProjectRuntime:
         authorization = AuthorizationService(permission_engine, audit_log)
         filesystem = FileSystemService(workspace, authorization)
         execution = ControlledExecutionService(workspace, authorization, command_policy)
+        validation = TaskSpecValidationService(filesystem)
         tasks._bind_execution_service(execution)
         return cls(
             workspace=workspace,
@@ -66,4 +69,5 @@ class ProjectRuntime:
             execution=execution,
             tools=core_tool_registry(),
             tasks=tasks,
+            validation=validation,
         )

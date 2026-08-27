@@ -17,6 +17,15 @@ from .benchmark import (
     validate_benchmark_suite,
 )
 from .config import configured_coder_command, configured_ollama, ensure_project_memory, load_config, save_config
+from .core import (
+    Actor,
+    ActorKind,
+    Capability,
+    CommandPolicy,
+    Decision,
+    ProjectRuntime,
+    StaticPermissionPolicy,
+)
 from .draft import DraftError, draft_task_spec, refine_task_spec_with_ollama, write_task_spec
 from .evolution import (
     EvolutionError,
@@ -478,8 +487,24 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    spec = TaskSpec.load(args.taskspec)
-    print(f"TaskSpec 검증 완료: {spec.task_id} ({spec.display_title()})")
+    runtime = ProjectRuntime.create(
+        Path.cwd(),
+        permission_policy=StaticPermissionPolicy(
+            {Capability.PROJECT_READ: Decision.ALLOW},
+            policy_id="cli-validate-read-only-v1",
+        ),
+        command_policy=CommandPolicy.current_python(),
+    )
+    result = runtime.validation.validate(
+        str(args.taskspec),
+        actor=Actor(ActorKind.USER, "local-cli"),
+    )
+    if not result.success:
+        assert result.error is not None
+        raise SpecError(f"{result.error.code.value}: {result.error.message}")
+
+    assert result.data is not None
+    print(f"TaskSpec 검증 완료: {result.data['task_id']} ({result.data['title']})")
     return 0
 
 
