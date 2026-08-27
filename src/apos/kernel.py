@@ -8,7 +8,7 @@ from typing import Callable, Protocol
 from .coder import CommandPatchCoder, build_coder_prompt, summarize_failures
 from .config import configured_coder_command, load_config
 from .executor import run_commands
-from .git import GitClient, GitError
+from .git import GitAmbiguousStateError, GitClient, GitError
 from .models import AttemptResult, ContextRequest, ExecutionResult, PermissionSpec, RunSummary, TaskSpec
 from .pathing import PathPolicyError, normalize_project_path, project_path
 from .permissions import PermissionError, PermissionManager
@@ -209,10 +209,29 @@ class Kernel:
                 self.git.apply_patch(response.patch)
                 patch_applied = True
                 permissions.validate_write_paths(changed_by_patch)
+            except GitAmbiguousStateError as exc:
+                message = f"repository recovery required: {exc}"
+                attempt = AttemptResult(attempt_number, "RECOVERY_REQUIRED", message)
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
+                return self._finish(recorder, RunSummary("RECOVERY_REQUIRED", spec.task_id, branch, attempts))
             except (PermissionError, GitError) as exc:
                 message = _patch_failure_message(str(exc))
                 if patch_applied:
-                    message = self._rollback_failed_patch(recorder, attempt_number, response.patch, message)
+                    message, recovery_required = self._rollback_failed_patch(
+                        recorder,
+                        attempt_number,
+                        response.patch,
+                        message,
+                    )
+                    if recovery_required:
+                        attempt = AttemptResult(attempt_number, "RECOVERY_REQUIRED", message)
+                        attempts.append(attempt)
+                        recorder.record_attempt(attempt)
+                        return self._finish(
+                            recorder,
+                            RunSummary("RECOVERY_REQUIRED", spec.task_id, branch, attempts),
+                        )
                 attempt = AttemptResult(attempt_number, "FAILED", message)
                 attempts.append(attempt)
                 recorder.record_attempt(attempt)
@@ -225,7 +244,20 @@ class Kernel:
                 try:
                     permissions.validate_write_paths(changed_by_patch)
                 except PermissionError as exc:
-                    message = self._rollback_failed_patch(recorder, attempt_number, response.patch, str(exc))
+                    message, recovery_required = self._rollback_failed_patch(
+                        recorder,
+                        attempt_number,
+                        response.patch,
+                        str(exc),
+                    )
+                    if recovery_required:
+                        attempt = AttemptResult(attempt_number, "RECOVERY_REQUIRED", message, test_results)
+                        attempts.append(attempt)
+                        recorder.record_attempt(attempt)
+                        return self._finish(
+                            recorder,
+                            RunSummary("RECOVERY_REQUIRED", spec.task_id, branch, attempts),
+                        )
                     attempt = AttemptResult(attempt_number, "FAILED", message, test_results)
                     attempts.append(attempt)
                     recorder.record_attempt(attempt)
@@ -252,7 +284,20 @@ class Kernel:
                 )
 
             previous_error = summarize_failures(test_results)
-            previous_error = self._rollback_failed_patch(recorder, attempt_number, response.patch, previous_error)
+            previous_error, recovery_required = self._rollback_failed_patch(
+                recorder,
+                attempt_number,
+                response.patch,
+                previous_error,
+            )
+            if recovery_required:
+                attempt = AttemptResult(attempt_number, "RECOVERY_REQUIRED", previous_error, test_results)
+                attempts.append(attempt)
+                recorder.record_attempt(attempt)
+                return self._finish(
+                    recorder,
+                    RunSummary("RECOVERY_REQUIRED", spec.task_id, branch, attempts),
+                )
             attempt = AttemptResult(attempt_number, "FAILED", previous_error, test_results)
             attempts.append(attempt)
             recorder.record_attempt(attempt)
@@ -290,15 +335,19 @@ class Kernel:
         recorder.record_summary(summary_with_log)
         return summary_with_log
 
-    def _rollback_failed_patch(self, recorder: RunRecorder, attempt: int, patch: str, message: str) -> str:
+    def _rollback_failed_patch(self, recorder: RunRecorder, attempt: int, patch: str, message: str) -> tuple[str, bool]:
         try:
             self.git.reverse_patch(patch)
+        except GitAmbiguousStateError as exc:
+            rollback_message = f"rollback requires recovery: {exc}"
+            recorder.record_rollback(attempt, "RECOVERY_REQUIRED", rollback_message)
+            return f"{message}\n{rollback_message}", True
         except GitError as exc:
             rollback_message = f"rollback failed: {exc}"
             recorder.record_rollback(attempt, "FAILED", rollback_message)
-            return f"{message}\n{rollback_message}"
+            return f"{message}\n{rollback_message}", True
         recorder.record_rollback(attempt, "PASS", "failed attempt patch was rolled back")
-        return message
+        return message, False
 
     def _apply_file_replacement(
         self,

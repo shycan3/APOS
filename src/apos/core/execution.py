@@ -58,6 +58,7 @@ class CommandRequest:
     args: tuple[str, ...] = ()
     cwd: str = ""
     environment: Mapping[str, str] = field(default_factory=dict)
+    stdin_text: str | None = None
     network_policy: NetworkPolicy = NetworkPolicy.DENIED
     limits: ResourceLimits = field(default_factory=ResourceLimits)
     capability: Capability = Capability.PROCESS_EXECUTE
@@ -349,7 +350,8 @@ class ControlledExecutionService:
                 "timeout_seconds": request.limits.timeout_seconds,
                 "output_limit_bytes_per_stream": request.limits.max_output_bytes_per_stream,
                 "shell": False,
-            },
+            }
+            | _stdin_metadata(request.stdin_text),
             request_id=request.request_id,
             task_id=request.task_id,
         )
@@ -435,7 +437,8 @@ class ControlledExecutionService:
                     "args_digest": _mapping_digest(list(request.args)),
                     "cwd": normalized_cwd or ".",
                     "shell": False,
-                },
+                }
+                | _stdin_metadata(request.stdin_text),
             )
             try:
                 environment, output_redactor = self.environment_sanitizer.build(
@@ -454,7 +457,7 @@ class ControlledExecutionService:
                     [str(assessment.executable), *request.args],
                     cwd=cwd,
                     env=environment,
-                    stdin=subprocess.DEVNULL,
+                    stdin=subprocess.PIPE if request.stdin_text is not None else subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     shell=False,
@@ -465,6 +468,17 @@ class ControlledExecutionService:
                 return self._finished_failure(
                     authorization, started, started_at, ErrorCode.PROCESS_START_FAILED, str(exc)
                 )
+
+            if request.stdin_text is not None and process.stdin is not None:
+                try:
+                    process.stdin.write(request.stdin_text.encode("utf-8"))
+                    process.stdin.close()
+                except OSError as exc:
+                    self._terminate_process_tree(process)
+                    return self._finished_failure(
+                        authorization, started, started_at, ErrorCode.IO_ERROR,
+                        f"failed to write process stdin: {exc}",
+                    )
 
             with self._active_lock:
                 self._active[request.request_id] = process
@@ -643,3 +657,16 @@ class ControlledExecutionService:
 def _mapping_digest(value: Any) -> str:
     serialized = json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _text_digest(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _stdin_metadata(value: str | None) -> dict[str, str]:
+    digest = _text_digest(value)
+    if digest is None:
+        return {}
+    return {"stdin_digest": digest}

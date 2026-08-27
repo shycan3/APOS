@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 import shutil
 from uuid import uuid4
@@ -20,15 +21,31 @@ from .workspace import ProjectWorkspace
 class GitExecutionError(RuntimeError):
     """Raised when a controlled Git operation cannot satisfy its contract."""
 
+    def __init__(self, message: str, *, recovery_required: bool = False) -> None:
+        super().__init__(message)
+        self.recovery_required = recovery_required
+
 
 @dataclass(frozen=True)
 class GitSnapshot:
     branch: str
     head: str | None
     dirty: bool
+    changed_files: tuple[str, ...] = ()
+    staged_files: tuple[str, ...] = ()
+    patch_digest: str | None = None
+    expected_changed_paths: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, str | bool | None]:
-        return {"branch": self.branch, "head": self.head, "dirty": self.dirty}
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "branch": self.branch,
+            "head": self.head,
+            "dirty": self.dirty,
+            "changed_files": list(self.changed_files),
+            "staged_files": list(self.staged_files),
+            "patch_digest": self.patch_digest,
+            "expected_changed_paths": list(self.expected_changed_paths),
+        }
 
 
 @dataclass
@@ -77,6 +94,57 @@ class GitExecutionSession:
         if not result.success:
             raise GitExecutionError(self._message(result, "git status --porcelain failed"))
         return str(result.data.get("stdout", ""))
+
+    def check_patch(self, patch: str) -> None:
+        result = self._run_read(
+            "apply",
+            "--recount",
+            "--ignore-space-change",
+            "--check",
+            "-",
+            stdin_text=patch,
+        )
+        if not result.success:
+            raise GitExecutionError(self._message(result, "git apply --check failed"))
+
+    def apply_patch(self, patch: str) -> None:
+        expected_paths = self._patch_paths(patch)
+        patch_digest = self._patch_digest(patch)
+        self.check_patch(patch)
+        self._run_patch_mutation(
+            patch,
+            args=("apply", "--recount", "--ignore-space-change", "-"),
+            capability=Capability.GIT_WORKTREE_WRITE,
+            operation_name="apply_patch",
+            expected_paths=expected_paths,
+            patch_digest=patch_digest,
+        )
+
+    def check_reverse_patch(self, patch: str) -> None:
+        result = self._run_read(
+            "apply",
+            "--reverse",
+            "--recount",
+            "--ignore-space-change",
+            "--check",
+            "-",
+            stdin_text=patch,
+        )
+        if not result.success:
+            raise GitExecutionError(self._message(result, "git apply --reverse --check failed"))
+
+    def reverse_patch(self, patch: str) -> None:
+        expected_paths = self._patch_paths(patch)
+        patch_digest = self._patch_digest(patch)
+        self.check_reverse_patch(patch)
+        self._run_patch_mutation(
+            patch,
+            args=("apply", "--reverse", "--recount", "--ignore-space-change", "-"),
+            capability=Capability.GIT_ROLLBACK,
+            operation_name="reverse_patch",
+            expected_paths=expected_paths,
+            patch_digest=patch_digest,
+        )
 
     def checkout_task_branch(self, branch: str) -> None:
         self._validate_branch_name(branch)
@@ -185,20 +253,87 @@ class GitExecutionSession:
             return None
         return str(result.data.get("stdout", "")).strip() or None
 
-    def _snapshot(self) -> GitSnapshot:
+    def _snapshot(
+        self,
+        *,
+        patch_digest: str | None = None,
+        expected_paths: tuple[str, ...] = (),
+    ) -> GitSnapshot:
+        status = self.status_porcelain()
+        changed, staged = self._parse_status(status)
         return GitSnapshot(
             branch=self.current_branch(),
             head=self._head(),
-            dirty=bool(self.status_porcelain()),
+            dirty=bool(status),
+            changed_files=changed,
+            staged_files=staged,
+            patch_digest=patch_digest,
+            expected_changed_paths=expected_paths,
         )
 
-    def _run_read(self, *args: str, request_id: str | None = None) -> ToolResult[dict[str, object]]:
+    def _run_read(
+        self,
+        *args: str,
+        request_id: str | None = None,
+        stdin_text: str | None = None,
+    ) -> ToolResult[dict[str, object]]:
         request = self._request(
             args,
             capability=Capability.GIT_READ,
             request_id=request_id or uuid4().hex,
+            stdin_text=stdin_text,
         )
         return self.service.execution.run(request)
+
+    def _run_patch_mutation(
+        self,
+        patch: str,
+        *,
+        args: tuple[str, ...],
+        capability: Capability,
+        operation_name: str,
+        expected_paths: tuple[str, ...],
+        patch_digest: str,
+    ) -> None:
+        before = self._snapshot(patch_digest=patch_digest, expected_paths=expected_paths)
+        task_id = f"git-patch:{uuid4().hex}"
+        result = self._run_patch_task(
+            args,
+            patch,
+            capability=capability,
+            task_id=task_id,
+            metadata={
+                "git_operation": operation_name,
+                "patch_digest": patch_digest,
+                "target_branch": before.branch,
+                "head_before": before.head,
+                "expected_changed_paths": list(expected_paths),
+                "snapshot_before": before.to_dict(),
+            },
+        )
+
+        try:
+            after = self._snapshot(patch_digest=patch_digest, expected_paths=expected_paths)
+        except Exception as exc:
+            self._mark_patch_recovery(task_id, f"patch state verification failed: {type(exc).__name__}")
+            raise GitExecutionError("patch state verification failed", recovery_required=True) from exc
+
+        if not result.success:
+            if self._same_snapshot(before, after):
+                self._complete_patch_task(task_id, False, result)
+                raise GitExecutionError(self._message(result, f"git {operation_name} failed"))
+            self._mark_patch_recovery(task_id, "git mutation failed and repository state changed or is ambiguous")
+            raise GitExecutionError(
+                self._message(result, f"git {operation_name} left repository state ambiguous"),
+                recovery_required=True,
+            )
+
+        if self._verified_patch_state(before, after, expected_paths, reverse=(capability == Capability.GIT_ROLLBACK)):
+            self._complete_patch_task(task_id, True, result)
+            return
+
+        self._mark_patch_recovery(task_id, "git mutation completed but repository state verification failed")
+        raise GitExecutionError("git mutation completed but repository state verification failed", recovery_required=True)
 
     def _run_branch_task(
         self,
@@ -245,6 +380,51 @@ class GitExecutionSession:
         )
         return self.service.tasks.run_command_task(request, close_on_result=False)
 
+    def _run_patch_task(
+        self,
+        args: tuple[str, ...],
+        patch: str,
+        *,
+        capability: Capability,
+        task_id: str,
+        metadata: dict[str, object],
+    ) -> ToolResult[dict[str, object]]:
+        request = self._request(
+            args,
+            capability=capability,
+            request_id=uuid4().hex,
+            task_id=task_id,
+            stdin_text=patch,
+        )
+        self.service.tasks.create_command_task(
+            request,
+            description="Execute APOS patch Git mutation",
+            metadata=metadata,
+        )
+        self.service.tasks.queue_task(task_id, actor=self.actor)
+        self.service.tasks.request_approval(task_id, actor=self.actor)
+
+        permission_request = self.service.tasks.get_permission_request(task_id)
+        if self.approved_by is None:
+            return ToolResult.fail(
+                ErrorCode.PERMISSION_REQUIRED,
+                "persistent human approval is required before Git patch mutation",
+                details={"task_id": task_id},
+            )
+
+        self.service.tasks.grant_approval(
+            task_id,
+            action=ApprovalAction(
+                request_id=permission_request.request_id,
+                request_digest=permission_request.digest(),
+                subject=self.actor,
+                approved_by=self.approved_by,
+                source=ApprovalSource.UNAUTHENTICATED_USER_REQUEST,
+                note="Local apos run invocation approved this exact Git patch mutation.",
+            ),
+        )
+        return self.service.tasks.run_command_task(request, close_on_result=False)
+
     def _request(
         self,
         args: tuple[str, ...],
@@ -252,12 +432,14 @@ class GitExecutionSession:
         capability: Capability,
         request_id: str,
         task_id: str | None = None,
+        stdin_text: str | None = None,
     ) -> CommandRequest:
         return CommandRequest(
             executable=self.service.git_executable,
             args=(*self._git_safety_args(), *args),
             cwd="",
             environment=self._git_environment(),
+            stdin_text=stdin_text,
             actor=self.actor,
             capability=capability,
             network_policy=NetworkPolicy.DENIED,
@@ -280,6 +462,103 @@ class GitExecutionSession:
 
     def _git_environment(self) -> dict[str, str]:
         return {}
+
+    def _complete_patch_task(self, task_id: str, succeeded: bool, result: ToolResult[dict[str, object]]) -> None:
+        current = self.service.tasks.get_task(task_id)
+        if current.state == TaskState.RUNNING:
+            self.service.tasks.complete_task(
+                task_id,
+                actor=self.actor,
+                succeeded=succeeded,
+                failure_information=None if succeeded else {
+                    "error_code": result.error.code.value if result.error else ErrorCode.INTERNAL_ERROR.value,
+                    "message": result.error.message if result.error else "git patch mutation failed",
+                },
+            )
+        elif current.state == TaskState.APPROVED:
+            self.service.tasks.complete_task(
+                task_id,
+                actor=self.actor,
+                succeeded=False,
+                failure_information={
+                    "error_code": result.error.code.value if result.error else ErrorCode.INTERNAL_ERROR.value,
+                    "message": result.error.message if result.error else "git patch mutation failed",
+                },
+            )
+
+    def _mark_patch_recovery(self, task_id: str, reason: str) -> None:
+        current = self.service.tasks.get_task(task_id)
+        if current.state == TaskState.RUNNING:
+            self.service.tasks.mark_recovery_required(task_id, actor=self.actor, reason=reason)
+        elif current.state == TaskState.APPROVED:
+            self.service.tasks.complete_task(
+                task_id,
+                actor=self.actor,
+                succeeded=False,
+                failure_information={"error_code": ErrorCode.INTERNAL_ERROR.value, "message": reason},
+            )
+
+    @staticmethod
+    def _same_snapshot(before: GitSnapshot, after: GitSnapshot) -> bool:
+        return (
+            before.branch == after.branch
+            and before.head == after.head
+            and before.changed_files == after.changed_files
+            and before.staged_files == after.staged_files
+        )
+
+    @staticmethod
+    def _verified_patch_state(
+        before: GitSnapshot,
+        after: GitSnapshot,
+        expected_paths: tuple[str, ...],
+        *,
+        reverse: bool,
+    ) -> bool:
+        if before.branch != after.branch or before.head != after.head:
+            return False
+        before_changed = set(before.changed_files)
+        after_changed = set(after.changed_files)
+        expected = set(expected_paths)
+        if set(after.staged_files) != set(before.staged_files):
+            return False
+        if reverse:
+            return after_changed.isdisjoint(expected) and after_changed.issubset(before_changed)
+        return expected.issubset(after_changed) and after_changed.issubset(before_changed | expected)
+
+    @staticmethod
+    def _parse_status(status: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        changed: set[str] = set()
+        staged: set[str] = set()
+        for line in status.splitlines():
+            if len(line) < 4:
+                continue
+            index_status = line[0]
+            worktree_status = line[1]
+            path_text = line[3:]
+            paths = [path_text]
+            if " -> " in path_text:
+                paths = path_text.split(" -> ", 1)
+            for path in paths:
+                cleaned = path.strip().strip('"')
+                if cleaned:
+                    changed.add(cleaned)
+                    if index_status not in {" ", "?"}:
+                        staged.add(cleaned)
+            if worktree_status not in {" ", "?"}:
+                changed.update(path.strip().strip('"') for path in paths if path.strip())
+
+        return tuple(sorted(changed)), tuple(sorted(staged))
+
+    @staticmethod
+    def _patch_digest(patch: str) -> str:
+        return hashlib.sha256(patch.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _patch_paths(patch: str) -> tuple[str, ...]:
+        from ..permissions import _extract_patch_paths
+
+        return tuple(sorted(_extract_patch_paths(patch)))
 
     @staticmethod
     def _message(result: ToolResult[dict[str, object]], fallback: str) -> str:

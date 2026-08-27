@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from .core.git_execution import GitExecutionError, GitExecutionSession
-from .git import GitClient, GitError
+from .git import GitAmbiguousStateError, GitClient, GitError
 
 
 @dataclass(frozen=True)
@@ -43,10 +43,10 @@ class ControlledGitClient:
         self._translate(lambda: self.session.checkout_task_branch(branch))
 
     def apply_patch(self, patch: str) -> None:
-        self._legacy.apply_patch(patch)
+        self._translate(lambda: self.session.apply_patch(patch))
 
     def reverse_patch(self, patch: str) -> None:
-        self._legacy.reverse_patch(patch)
+        self._translate(lambda: self.session.reverse_patch(patch))
 
     def diff(self) -> str:
         return self._legacy.diff()
@@ -67,4 +67,6 @@ class ControlledGitClient:
         try:
             return action()
         except GitExecutionError as exc:
+            if exc.recovery_required:
+                raise GitAmbiguousStateError(str(exc)) from exc
             raise GitError(str(exc)) from exc

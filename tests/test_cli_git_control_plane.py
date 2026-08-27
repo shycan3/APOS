@@ -23,7 +23,7 @@ from apos.core import (
     TaskState,
 )
 from apos.core.git_execution import GitExecutionError
-from apos.git import GitClient
+from apos.git import GitAmbiguousStateError, GitClient
 
 
 class ProductionGitControlPlaneTests(unittest.TestCase):
@@ -172,20 +172,314 @@ class ProductionGitControlPlaneTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertEqual(self._git(root, "branch", "--show-current").stdout.strip(), "apos/no-hook")
 
+    def test_production_run_migrates_patch_apply_without_legacy_apply(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root, content="def answer():\n    return 0\n")
+            test_file = root / "test_ok.py"
+            test_file.write_text(
+                "from app import answer\nassert answer() == 42\nprint('ok')\n",
+                encoding="utf-8",
+            )
+            task = self._write_taskspec(root, branch="apos/patch-apply", allowed_files=["app.py"])
+            coder = self._write_patch_coder(
+                root,
+                """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 42
+""",
+            )
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-m", "task")
+
+            with (
+                patch("apos.cli.Path.cwd", return_value=root),
+                patch.object(GitClient, "apply_patch", side_effect=AssertionError("legacy apply called")),
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "run",
+                        str(task),
+                        "--coder-command",
+                        subprocess.list2cmdline([sys.executable, str(coder)]),
+                        "--max-attempts",
+                        "1",
+                        "--no-commit",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIn("return 42", (root / "app.py").read_text(encoding="utf-8"))
+            self.assertIn((Capability.GIT_WORKTREE_WRITE.value, TaskState.SUCCEEDED.value), self._task_rows(root))
+            patch_events = [
+                event for event in self._audit_events(root)
+                if event["capability"] == Capability.GIT_WORKTREE_WRITE.value
+                and event["operation"] == "git.run"
+            ]
+            self.assertEqual([event["status"] for event in patch_events[-4:]], ["REQUESTED", "AUTHORIZED", "STARTED", "COMPLETED"])
+
+    def test_production_run_migrates_rollback_and_allows_retry_after_verified_reverse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root, content="def answer():\n    return 0\n")
+            (root / "test_ok.py").write_text(
+                "from app import answer\nassert answer() == 42\nprint('ok')\n",
+                encoding="utf-8",
+            )
+            task = self._write_taskspec(root, branch="apos/patch-rollback", allowed_files=["app.py"])
+            coder = self._write_sequential_patch_coder(
+                root,
+                first="""diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 41
+""",
+                second="""diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 42
+""",
+            )
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-m", "task")
+
+            with (
+                patch("apos.cli.Path.cwd", return_value=root),
+                patch.object(GitClient, "apply_patch", side_effect=AssertionError("legacy apply called")),
+                patch.object(GitClient, "reverse_patch", side_effect=AssertionError("legacy reverse called")),
+                redirect_stdout(io.StringIO()),
+            ):
+                code = main(
+                    [
+                        "run",
+                        str(task),
+                        "--coder-command",
+                        subprocess.list2cmdline([sys.executable, str(coder)]),
+                        "--max-attempts",
+                        "2",
+                        "--no-commit",
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIn("return 42", (root / "app.py").read_text(encoding="utf-8"))
+            rows = self._task_rows(root)
+            self.assertIn((Capability.GIT_WORKTREE_WRITE.value, TaskState.SUCCEEDED.value), rows)
+            self.assertIn((Capability.GIT_ROLLBACK.value, TaskState.SUCCEEDED.value), rows)
+
+    def test_patch_request_digest_changes_with_patch_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root)
+            runtime = ProjectRuntime.create_local_git_phase_a(root)
+            actor = Actor(ActorKind.USER, "local-cli")
+            session = runtime.git_execution.bind(actor=actor, approved_by=actor)
+            request_a = session._request(
+                ("apply", "--recount", "--ignore-space-change", "-"),
+                capability=Capability.GIT_WORKTREE_WRITE,
+                request_id="patch-request",
+                task_id="patch-task",
+                stdin_text="diff --git a/a b/a\n",
+            )
+            request_b = session._request(
+                ("apply", "--recount", "--ignore-space-change", "-"),
+                capability=Capability.GIT_WORKTREE_WRITE,
+                request_id="patch-request",
+                task_id="patch-task",
+                stdin_text="diff --git a/b b/b\n",
+            )
+
+            prepared_a = runtime.execution.prepare(request_a).permission_request
+            prepared_b = runtime.execution.prepare(request_b).permission_request
+
+            self.assertNotEqual(prepared_a.metadata["stdin_digest"], prepared_b.metadata["stdin_digest"])
+            self.assertNotEqual(prepared_a.digest(), prepared_b.digest())
+
+    def test_patch_check_uses_git_read_without_mutation_or_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root, content="def answer():\n    return 0\n")
+            session = self._session(root)
+            patch_text = """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 42
+"""
+
+            session.check_patch(patch_text)
+
+            self.assertIn("return 0", (root / "app.py").read_text(encoding="utf-8"))
+            self.assertEqual(self._task_rows(root), [])
+            git_read_events = [
+                event for event in self._audit_events(root)
+                if event["capability"] == Capability.GIT_READ.value
+                and event["operation"] == "git.run"
+                and event["status"] == "COMPLETED"
+            ]
+            self.assertTrue(git_read_events)
+
+    def test_denied_patch_apply_capability_fails_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root, content="def answer():\n    return 0\n")
+            runtime = ProjectRuntime.create(
+                root,
+                permission_policy=StaticPermissionPolicy(
+                    {
+                        Capability.GIT_READ: Decision.ALLOW,
+                        Capability.GIT_WORKTREE_WRITE: Decision.DENY,
+                    },
+                    policy_id="deny-patch-apply",
+                ),
+                command_policy=CommandPolicy.current_git(),
+            )
+            actor = Actor(ActorKind.USER, "local-cli")
+            session = runtime.git_execution.bind(actor=actor, approved_by=actor)
+            patch_text = """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 42
+"""
+
+            with self.assertRaises(GitExecutionError):
+                session.apply_patch(patch_text)
+
+            self.assertIn("return 0", (root / "app.py").read_text(encoding="utf-8"))
+            self.assertIn((Capability.GIT_WORKTREE_WRITE.value, TaskState.FAILED.value), self._task_rows(root))
+            events = [
+                event for event in self._audit_events(root)
+                if event["capability"] == Capability.GIT_WORKTREE_WRITE.value
+                and event["operation"] == "git.run"
+            ]
+            self.assertEqual([event["status"] for event in events], ["REQUESTED", "DENIED"])
+
+    def test_apply_verification_failure_requires_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root, content="def answer():\n    return 0\n")
+            session = self._session(root)
+            patch_text = """diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 42
+"""
+            before = session._snapshot(
+                patch_digest=session._patch_digest(patch_text),
+                expected_paths=session._patch_paths(patch_text),
+            )
+
+            with patch.object(session, "_snapshot", side_effect=[before, RuntimeError("lost state")]):
+                with self.assertRaises(GitExecutionError) as raised:
+                    session.apply_patch(patch_text)
+
+            self.assertTrue(raised.exception.recovery_required)
+            self.assertIn(
+                (Capability.GIT_WORKTREE_WRITE.value, TaskState.RECOVERY_REQUIRED.value),
+                self._task_rows(root),
+            )
+
+    def test_ambiguous_rollback_blocks_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._init_repo(root, content="def answer():\n    return 0\n")
+            (root / "test_ok.py").write_text(
+                "from app import answer\nassert answer() == 42\nprint('ok')\n",
+                encoding="utf-8",
+            )
+            task = self._write_taskspec(root, branch="apos/rollback-recovery", allowed_files=["app.py"])
+            coder = self._write_sequential_patch_coder(
+                root,
+                first="""diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 41
+""",
+                second="""diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1,2 +1,2 @@
+ def answer():
+-    return 0
++    return 42
+""",
+            )
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-m", "task")
+            stdout = io.StringIO()
+
+            with (
+                patch("apos.cli.Path.cwd", return_value=root),
+                patch(
+                    "apos.controlled_git.ControlledGitClient.reverse_patch",
+                    side_effect=GitAmbiguousStateError("simulated ambiguous rollback"),
+                ),
+                redirect_stdout(stdout),
+            ):
+                code = main(
+                    [
+                        "run",
+                        str(task),
+                        "--coder-command",
+                        subprocess.list2cmdline([sys.executable, str(coder)]),
+                        "--max-attempts",
+                        "2",
+                        "--no-commit",
+                        "--json",
+                    ]
+                )
+
+            summary = json.loads(stdout.getvalue())
+            self.assertEqual(code, 2)
+            self.assertEqual(summary["status"], "RECOVERY_REQUIRED")
+            self.assertEqual(len(summary["attempts"]), 1)
+            self.assertEqual(summary["attempts"][0]["status"], "RECOVERY_REQUIRED")
+
     def _session(self, root: Path):
         runtime = ProjectRuntime.create_local_git_phase_a(root)
         actor = Actor(ActorKind.USER, "local-cli")
         return runtime.git_execution.bind(actor=actor, approved_by=actor)
 
-    def _init_repo(self, root: Path) -> None:
+    def _init_repo(self, root: Path, *, content: str = "print('ok')\n") -> None:
         self._git(root, "init", "-b", "master")
         self._git(root, "config", "user.email", "apos@example.test")
         self._git(root, "config", "user.name", "APOS Test")
-        (root / "test_ok.py").write_text("print('ok')\n", encoding="utf-8")
+        if content.startswith("def answer"):
+            (root / "app.py").write_text(content, encoding="utf-8")
+        else:
+            (root / "test_ok.py").write_text(content, encoding="utf-8")
         self._git(root, "add", ".")
         self._git(root, "commit", "-m", "initial")
 
-    def _write_taskspec(self, root: Path, *, branch: str) -> Path:
+    def _write_taskspec(
+        self,
+        root: Path,
+        *,
+        branch: str,
+        allowed_files: list[str] | None = None,
+    ) -> Path:
         task = root / "task.json"
         task.write_text(
             json.dumps(
@@ -194,13 +488,35 @@ class ProductionGitControlPlaneTests(unittest.TestCase):
                     "title": "Git Phase A",
                     "goal": "Exercise migrated Git branch preparation.",
                     "branch": branch,
-                    "allowed_files": ["test_ok.py"],
+                    "allowed_files": allowed_files or ["test_ok.py"],
                     "test_commands": [subprocess.list2cmdline([sys.executable, "test_ok.py"])],
                 }
             ),
             encoding="utf-8",
         )
         return task
+
+    def _write_patch_coder(self, root: Path, patch_text: str) -> Path:
+        coder = root / "fake_coder.py"
+        coder.write_text(
+            "import sys\n"
+            "sys.stdin.read()\n"
+            f"print({patch_text!r}, end='')\n",
+            encoding="utf-8",
+        )
+        return coder
+
+    def _write_sequential_patch_coder(self, root: Path, *, first: str, second: str) -> Path:
+        coder = root / "fake_coder.py"
+        patches = {1: first, 2: second}
+        coder.write_text(
+            "import json, sys\n"
+            "payload = json.loads(sys.stdin.read())\n"
+            f"patches = {patches!r}\n"
+            "print(patches[payload['attempt']], end='')\n",
+            encoding="utf-8",
+        )
+        return coder
 
     def _git(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(

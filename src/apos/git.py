@@ -10,6 +10,10 @@ class GitError(RuntimeError):
     """Raised when a Git command fails."""
 
 
+class GitAmbiguousStateError(GitError):
+    """Raised when APOS cannot safely determine repository state after Git mutation."""
+
+
 def _slug(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.lower()).strip("-")
     return slug[:48] or "task"
