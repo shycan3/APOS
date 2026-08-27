@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from .benchmark import validate_benchmark_suite
 from .config import apos_dir
+from .core.commandline import parse_legacy_command
 from .git import GitClient, GitError
 from .kernel import Kernel, RunOptions
 from .models import TaskSpec
@@ -871,9 +872,9 @@ def _execute(
 ) -> dict[str, object]:
     try:
         completed = subprocess.run(
-            command,
+            parse_legacy_command(command),
             cwd=cwd,
-            shell=True,
+            shell=False,
             text=True,
             capture_output=True,
             timeout=timeout_seconds,

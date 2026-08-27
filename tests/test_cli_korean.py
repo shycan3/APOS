@@ -73,7 +73,17 @@ class KoreanCliTests(unittest.TestCase):
 
     def test_version_reports_candidate_version(self):
         output = self._run(Path.cwd(), [sys.executable, "-m", "apos", "--version"])
-        self.assertEqual(output.stdout.strip(), "apos 1.1.1")
+        self.assertEqual(output.stdout.strip(), "apos 1.2.0")
+
+    def test_apos_no_args_non_interactive_shows_help(self):
+        output = self._run(Path.cwd(), [sys.executable, "-m", "apos"])
+        self.assertIn("사용법:", output.stdout)
+        self.assertIn("APOS 1.2", output.stdout)
+
+    def test_evolution_no_args_non_interactive_shows_status(self):
+        output = self._run(Path.cwd(), [sys.executable, "-m", "apos", "evolution"])
+        self.assertIn("진화 상태:", output.stdout)
+        self.assertIn("기준선: v1.1.0", output.stdout)
 
     @staticmethod
     def _run(

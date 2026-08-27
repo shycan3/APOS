@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Sequence
 
+from .core.commandline import parse_legacy_command
 from .models import ContextRequest, ExecutionResult, TaskSpec
 from .pathing import project_path
 
@@ -34,14 +35,14 @@ class CommandPatchCoder:
         try:
             with tempfile.TemporaryDirectory(prefix="apos-coder-") as cwd:
                 completed = subprocess.run(
-                    self.command,
+                    parse_legacy_command(self.command) if isinstance(self.command, str) else self.command,
                     cwd=cwd,
                     input=prompt,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
                     capture_output=True,
-                    shell=isinstance(self.command, str),
+                    shell=False,
                     timeout=self.timeout_seconds,
                 )
         except subprocess.TimeoutExpired:

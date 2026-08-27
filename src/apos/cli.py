@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = KoreanArgumentParser(prog="apos", description="APOS 1.1 통제형 AI 개발 및 자기진화 실행 환경")
+    parser = KoreanArgumentParser(prog="apos", description="APOS 1.2 통제형 AI 개발 및 자기진화 실행 환경")
     parser.add_argument("--version", action="version", version=f"apos {__version__}", help="APOS 버전을 표시하고 종료합니다")
 
     subcommands = parser.add_subparsers(dest="command")
@@ -336,6 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
         aliases=["evolve"],
         help="격리된 APOS 진화 후보를 생성하고 통제합니다",
     )
+    evolution_parser.set_defaults(handler=cmd_evolution_orchestrator)
     evolution_subcommands = evolution_parser.add_subparsers(dest="evolution_command")
 
     evolution_validate_parser = evolution_subcommands.add_parser("validate", help="고정된 1.1 진화 정책을 검증합니다")
@@ -705,6 +706,18 @@ def cmd_benchmark_results_show(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
     _print_benchmark_result(result)
+    return 0
+
+
+def cmd_evolution_orchestrator(args: argparse.Namespace) -> int:
+    if getattr(args, "evolution_command", None) is None:
+        if sys.stdin.isatty():
+            from .orchestrator import run_orchestrator
+            return run_orchestrator()
+        root = GitClient(Path.cwd()).ensure_repo()
+        result = evolution_status(root)
+        _print_evolution_status(result)
+        return 0
     return 0
 
 

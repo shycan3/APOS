@@ -70,6 +70,31 @@ apos evolution status planning-1-2
 `--quick` deliberately produces `INCOMPLETE`; it can never be reviewed or
 promoted. A full evaluation must produce `READY_FOR_REVIEW` first.
 
+## CUI Orchestrator (v1.2.0)
+
+Starting with v1.2.0, APOS includes an interactive CUI orchestrator that
+guides the entire self-evolution workflow through numbered menu selections:
+
+```bash
+apos              # Enter orchestrator in TTY
+apos evolve       # Same as above
+```
+
+The orchestrator offers six menu choices plus exit:
+
+1. **One-stop Guided Evolution** – walks through proposal creation, candidate
+   isolation, local coder development, baseline evaluation, and review
+   recording in a single interactive session.
+2. **New Proposal & Candidate** – create a proposal and register a candidate.
+3. **Run Candidate** – execute local development on an existing candidate.
+4. **Evaluate Candidate** – run trusted baseline tests and benchmarks.
+5. **Record Review** – record Codex or Human approval/rejection.
+6. **Status & Policy Verification** – display detailed evolution state.
+
+The orchestrator never performs automatic promotion. When a candidate reaches
+`PROMOTABLE`, it prints the manual Git merge and tag commands for the user
+to execute externally.
+
 ## Invariants Through APOS 1.x
 
 - `v1.1.0` remains an ancestor of every accepted candidate.

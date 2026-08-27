@@ -3,15 +3,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from .core.commandline import parse_legacy_command
 from .models import ExecutionResult
 
 
 def run_command(command: str, cwd: Path, timeout_seconds: int) -> ExecutionResult:
     try:
         completed = subprocess.run(
-            command,
+            parse_legacy_command(command),
             cwd=cwd,
-            shell=True,
+            shell=False,
             text=True,
             capture_output=True,
             timeout=timeout_seconds,
@@ -50,4 +51,3 @@ def run_commands(commands: list[str], cwd: Path, timeout_seconds: int) -> list[E
         if not result.passed:
             break
     return results
-

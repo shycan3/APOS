@@ -13,3 +13,5 @@ venv/
 .apos/runs/
 .apos/benchmarks/
 .apos/evolution/
+.apos/audit/
+.apos/tmp/
