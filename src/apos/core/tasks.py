@@ -428,6 +428,11 @@ class SQLiteTaskRepository:
         failure_information: dict[str, Any] | None = None,
         cancellation_information: dict[str, Any] | None = None,
     ) -> PersistentTask:
+        if target in {TaskState.APPROVED, TaskState.RUNNING}:
+            raise TaskError(
+                ErrorCode.INVALID_TASK_TRANSITION,
+                f"{target.value} requires its dedicated approval transaction",
+            )
         with self._transaction() as connection:
             task = self._task_for_update(connection, task_id)
             TaskStateMachine.validate(task.state, target)
@@ -991,7 +996,7 @@ class _SQLiteTransaction:
 
 
 class TaskService:
-    """Persistent task lifecycle and approval boundary; it never executes tools directly."""
+    """Official persistent task lifecycle, approval, and controlled-execution boundary."""
 
     def __init__(
         self,
@@ -1005,15 +1010,25 @@ class TaskService:
         if audit_log.workspace.project_id != workspace.project_id:
             raise ValueError("task audit log belongs to a different project")
         self.workspace = workspace
-        self.repository = repository
+        self._repository = repository
         self.audit_log = audit_log
         self.redactor = redactor or audit_log.redactor
+        self._execution_service: ControlledExecutionService | None = None
         self.human_approval_boundary = (
             human_approval_boundary or LocalUnauthenticatedHumanApprovalBoundary()
         )
-        self.repository.initialize()
-        self.repository.recover_running(Actor(ActorKind.SYSTEM, "p0-3a-crash-recovery"))
+        self._repository.initialize()
+        self._repository.recover_running(Actor(ActorKind.SYSTEM, "p0-3a-crash-recovery"))
         self.flush_audit_events()
+
+    def _bind_execution_service(self, execution_service: "ControlledExecutionService") -> None:
+        """Bind the controlled executor once from the ProjectRuntime composition root."""
+
+        if self._execution_service is not None:
+            raise RuntimeError("controlled execution service is already bound")
+        if execution_service.workspace.project_id != self.workspace.project_id:
+            raise ValueError("execution service belongs to a different project")
+        self._execution_service = execution_service
 
     def create_task(
         self,
@@ -1044,28 +1059,28 @@ class TaskService:
             timestamps={TaskState.CREATED.value: now},
             metadata=self.redactor.redact(metadata or {}),
         )
-        created = self.repository.create(task, permission_request)
+        created = self._repository.create(task, permission_request)
         self.flush_audit_events()
         return created
 
     def get_task(self, task_id: str) -> PersistentTask:
-        return self.repository.get_task(task_id)
+        return self._repository.get_task(task_id)
 
     def get_permission_request(self, task_id: str) -> PermissionRequest:
-        task = self.repository.get_task(task_id)
-        return self.repository.get_permission_request(task.permission_request_id)
+        task = self._repository.get_task(task_id)
+        return self._repository.get_permission_request(task.permission_request_id)
 
     def get_approval(self, task_id: str) -> PersistentApproval:
-        task = self.repository.get_task(task_id)
+        task = self._repository.get_task(task_id)
         if task.approval_grant_id is None:
             raise TaskError(ErrorCode.APPROVAL_NOT_FOUND, "task has no approval")
-        return self.repository.get_approval(task.approval_grant_id)
+        return self._repository.get_approval(task.approval_grant_id)
 
     def queue_task(self, task_id: str, *, actor: Actor) -> PersistentTask:
         task = self._require_subject(task_id, actor)
         if task.state != TaskState.CREATED:
             TaskStateMachine.validate(task.state, TaskState.QUEUED)
-        changed = self.repository.transition(
+        changed = self._repository.transition(
             task_id,
             TaskState.QUEUED,
             actor=actor,
@@ -1076,7 +1091,7 @@ class TaskService:
 
     def request_approval(self, task_id: str, *, actor: Actor) -> PersistentTask:
         self._require_subject(task_id, actor)
-        changed = self.repository.transition(
+        changed = self._repository.transition(
             task_id,
             TaskState.WAITING_APPROVAL,
             actor=actor,
@@ -1091,8 +1106,8 @@ class TaskService:
         *,
         action: ApprovalAction,
     ) -> PersistentApproval:
-        task = self.repository.get_task(task_id)
-        request = self.repository.get_permission_request(task.permission_request_id)
+        task = self._repository.get_task(task_id)
+        request = self._repository.get_permission_request(task.permission_request_id)
         if task.state != TaskState.WAITING_APPROVAL:
             TaskStateMachine.validate(task.state, TaskState.APPROVED)
         if action.request_id != request.request_id or action.request_digest != request.digest():
@@ -1122,7 +1137,7 @@ class TaskService:
             issued_at=_utc_now(),
             expires_at=action.expires_at,
         )
-        _, stored = self.repository.issue_approval(task_id, approval)
+        _, stored = self._repository.issue_approval(task_id, approval)
         self.flush_audit_events()
         return stored
 
@@ -1131,7 +1146,7 @@ class TaskService:
         request: PermissionRequest,
         approval: ApprovalGrant,
     ) -> ApprovalConsumptionResult:
-        result = self.repository.consume_approval(request, approval)
+        result = self._repository.consume_approval(request, approval)
         self.flush_audit_events()
         return result
 
@@ -1139,7 +1154,7 @@ class TaskService:
         if request.task_id is None:
             return False
         try:
-            self.repository.get_task(request.task_id)
+            self._repository.get_task(request.task_id)
         except TaskError as exc:
             if exc.code == ErrorCode.TASK_NOT_FOUND:
                 return False
@@ -1149,12 +1164,16 @@ class TaskService:
     def run_command_task(
         self,
         request: "CommandRequest",
-        execution_service: "ControlledExecutionService",
         *,
         network_approval: ApprovalGrant | None = None,
     ):
-        """Run through ControlledExecutionService and close the persistent task lifecycle."""
+        """Run through the runtime-bound controlled executor and close the task lifecycle."""
 
+        if self._execution_service is None:
+            raise TaskError(
+                ErrorCode.INTERNAL_ERROR,
+                "controlled execution service is not configured for this task service",
+            )
         if request.task_id is None:
             raise TaskError(ErrorCode.INVALID_ARGUMENT, "command task_id is required")
         task = self._require_subject(request.task_id, request.actor)
@@ -1170,13 +1189,13 @@ class TaskService:
             )
         if task.approval_grant_id is None:
             raise TaskError(ErrorCode.APPROVAL_NOT_FOUND, "task has no approval")
-        approval = self.repository.get_approval(task.approval_grant_id)
-        result = execution_service.run(
+        approval = self._repository.get_approval(task.approval_grant_id)
+        result = self._execution_service.run(
             request,
             approval=approval.to_grant(),
             network_approval=network_approval,
         )
-        current = self.repository.get_task(task.task_id)
+        current = self._repository.get_task(task.task_id)
         if current.state == TaskState.RUNNING:
             if result.success:
                 self.complete_task(task.task_id, actor=task.actor, succeeded=True)
@@ -1210,7 +1229,7 @@ class TaskService:
         self._require_subject(task_id, actor)
         target = TaskState.SUCCEEDED if succeeded else TaskState.FAILED
         event = "TASK_SUCCEEDED" if succeeded else "TASK_FAILED"
-        changed = self.repository.transition(
+        changed = self._repository.transition(
             task_id,
             target,
             actor=actor,
@@ -1236,7 +1255,7 @@ class TaskService:
                 ErrorCode.INVALID_TASK_TRANSITION,
                 "RUNNING task cannot be cancelled until execution is confirmed stopped",
             )
-        changed = self.repository.transition(
+        changed = self._repository.transition(
             task_id,
             TaskState.CANCELLED,
             actor=actor,
@@ -1248,7 +1267,7 @@ class TaskService:
 
     def expire_task(self, task_id: str, *, actor: Actor, reason: str) -> PersistentTask:
         self._require_subject(task_id, actor)
-        changed = self.repository.transition(
+        changed = self._repository.transition(
             task_id,
             TaskState.EXPIRED,
             actor=actor,
@@ -1274,7 +1293,7 @@ class TaskService:
             )
         target = TaskState.CANCELLED if cancelled else TaskState.FAILED
         event = "TASK_CANCELLED" if cancelled else "TASK_FAILED"
-        changed = self.repository.transition(
+        changed = self._repository.transition(
             task_id,
             target,
             actor=actor,
@@ -1289,9 +1308,9 @@ class TaskService:
 
     def flush_audit_events(self) -> None:
         existing_ids = {event.get("event_id") for event in self.audit_log.events()}
-        for event in self.repository.pending_events():
+        for event in self._repository.pending_events():
             if event.event_id in existing_ids:
-                self.repository.mark_event_published(event.event_id, event.event_id)
+                self._repository.mark_event_published(event.event_id, event.event_id)
                 continue
             audit_event = self.audit_log.record(
                 event_id=event.event_id,
@@ -1311,11 +1330,11 @@ class TaskService:
                 },
                 task_id=event.task_id,
             )
-            self.repository.mark_event_published(event.event_id, audit_event.event_id)
+            self._repository.mark_event_published(event.event_id, audit_event.event_id)
             existing_ids.add(event.event_id)
 
     def _require_subject(self, task_id: str, actor: Actor) -> PersistentTask:
-        task = self.repository.get_task(task_id)
+        task = self._repository.get_task(task_id)
         if actor != task.actor:
             raise TaskError(
                 ErrorCode.APPROVAL_SUBJECT_MISMATCH,

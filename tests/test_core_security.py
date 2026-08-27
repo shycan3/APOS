@@ -7,6 +7,7 @@ from apos.core import (
     Actor,
     ActorKind,
     ApprovalGrant,
+    ApprovalSource,
     AuditLog,
     AuditStatus,
     AuthorizationService,
@@ -103,6 +104,40 @@ class PermissionEngineTests(unittest.TestCase):
                 approved_by=self.actor,
                 note="AI intent is not authorization.",
             )
+
+    def test_system_actor_cannot_issue_human_approval(self):
+        with self.assertRaises(ValueError):
+            ApprovalGrant(
+                request_id="exec-1",
+                project_id="project-1",
+                request_digest="0" * 64,
+                approved_by=Actor(ActorKind.SYSTEM, "policy-engine"),
+                note="System authorization is not human approval.",
+            )
+
+    def test_authenticated_human_grant_fails_closed_without_identity_proof(self):
+        for authenticated in (False, True):
+            with self.subTest(authenticated=authenticated):
+                with self.assertRaises(ValueError):
+                    ApprovalGrant(
+                        request_id="exec-1",
+                        project_id="project-1",
+                        request_digest="0" * 64,
+                        approved_by=Actor(ActorKind.USER, "unverified-name"),
+                        note="A string identity is not proof.",
+                        approval_source=ApprovalSource.AUTHENTICATED_HUMAN,
+                        authenticated=authenticated,
+                    )
+
+    def test_system_authorization_is_a_policy_decision_not_an_approval_grant(self):
+        engine = PermissionEngine(
+            StaticPermissionPolicy({Capability.PROJECT_READ: Decision.ALLOW})
+        )
+
+        decision = engine.evaluate(self._request(Capability.PROJECT_READ))
+
+        self.assertEqual(decision.decision, Decision.ALLOW)
+        self.assertIn("explicitly allowed", decision.reason)
 
     def test_policy_error_fails_closed(self):
         class BrokenPolicy:

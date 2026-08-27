@@ -48,10 +48,10 @@ class Decision(str, Enum):
 
 
 class ApprovalSource(str, Enum):
+    """Origin of human approval intent, not a system authorization decision."""
+
     UNAUTHENTICATED_USER_REQUEST = "UNAUTHENTICATED_USER_REQUEST"
     AUTHENTICATED_HUMAN = "AUTHENTICATED_HUMAN"
-    SYSTEM = "SYSTEM"
-    AI = "AI"
 
 
 @dataclass(frozen=True)
@@ -125,6 +125,13 @@ class PermissionRequest:
 
 @dataclass(frozen=True)
 class ApprovalGrant:
+    """Human-originated approval intent bound to one exact permission request.
+
+    P0-3A can carry an explicit local user request, but cannot prove a human
+    identity. Deterministic system authorization is represented by
+    PermissionDecision and must never be encoded as an ApprovalGrant.
+    """
+
     request_id: str
     project_id: str
     request_digest: str
@@ -137,21 +144,12 @@ class ApprovalGrant:
     expires_at: str | None = None
 
     def __post_init__(self) -> None:
-        if self.approved_by.kind not in {ActorKind.USER, ActorKind.SYSTEM}:
-            raise ValueError("approval grants must be issued by a USER or SYSTEM actor")
-        if self.approval_source in {
-            ApprovalSource.UNAUTHENTICATED_USER_REQUEST,
-            ApprovalSource.AUTHENTICATED_HUMAN,
-        } and self.approved_by.kind != ActorKind.USER:
-            raise ValueError("human approval sources require a USER approver")
-        if self.approval_source == ApprovalSource.SYSTEM and self.approved_by.kind != ActorKind.SYSTEM:
-            raise ValueError("SYSTEM approval source requires a SYSTEM approver")
-        if self.approval_source == ApprovalSource.AI:
-            raise ValueError("AI approval grants are never trusted")
-        if self.approval_source == ApprovalSource.AUTHENTICATED_HUMAN and not self.authenticated:
-            raise ValueError("authenticated human approval requires identity proof")
-        if self.approval_source != ApprovalSource.AUTHENTICATED_HUMAN and self.authenticated:
-            raise ValueError("only AUTHENTICATED_HUMAN grants may be marked authenticated")
+        if self.approved_by.kind != ActorKind.USER:
+            raise ValueError("human approval grants must be issued by a USER actor")
+        if self.approval_source == ApprovalSource.AUTHENTICATED_HUMAN:
+            raise ValueError("authenticated human approval is not implemented")
+        if self.authenticated:
+            raise ValueError("P0-3A approval grants cannot claim authenticated identity")
         if not self.note.strip():
             raise ValueError("approval note is required")
         if len(self.request_digest) != 64:
@@ -179,6 +177,8 @@ class ApprovalConsumer(Protocol):
 
 @dataclass(frozen=True)
 class PermissionDecision:
+    """Deterministic system authorization result; it is not human approval."""
+
     decision: Decision
     capability: Capability
     reason: str
@@ -264,6 +264,8 @@ class PermissionEngine:
                     ErrorCode.POLICY_EVALUATION_FAILED,
                 )
         if decision.decision == Decision.DENY:
+            return decision
+        if decision.decision == Decision.ALLOW and not persistent_required:
             return decision
         if approval is None:
             if persistent_required:

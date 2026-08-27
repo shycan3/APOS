@@ -3,12 +3,13 @@
 ## Review Basis
 
 - Repository: `https://github.com/shycan3/APOS.git`
-- Branch: `master`
+- Branch: `review/p0-3a`
 - Base commit: `7c5265436fb94f8c852ccd4d7e9e398874b53284`
-- Additional reviewed state: uncommitted P0-3A persistent task/approval implementation
-- Scope: the code present on GitHub `master` plus the current P0-3A working tree
+- P0-3A checkpoint: `741b19f16d0e944129d54d2a79e47a5dd0498e4c`
+- Additional reviewed state: uncommitted P0-3A Review Fix working tree
+- Scope: the P0-2 base, P0-3A checkpoint, and current review-fix changes
 - Review type: static architecture and threat-model audit
-- Code changes: none
+- Code changes: P0-3A architecture/security semantics review fixes only
 
 This review distinguishes three different statements throughout the document:
 
@@ -89,7 +90,7 @@ Actor kind and `actor_id` are data, not authenticated principals. They become se
 - Every privileged caller voluntarily uses the new core services.
 - Every path in `CommandPolicy.trusted_executables` is trusted in full.
 - Trusted executable files and their load dependencies do not change between validation and launch.
-- A `USER` or `SYSTEM` label on an `ApprovalGrant` represents a real trusted approver.
+- A `USER` label on an `ApprovalGrant` represents actual local human intent, even though no identity proof exists.
 - The process cannot or will not bypass `NetworkPolicy` using its own APIs.
 - Other processes do not tamper with the audit file.
 
@@ -252,9 +253,13 @@ Therefore any security argument that assumes `NETWORK_DENIED` means the child la
 
 `fsync()` improves durability after a successful write. It does not provide authenticity, immutability, non-repudiation, or tamper evidence. The log location is inside the project and `APOS_PROJECT_ROOT` is explicitly provided to the child.
 
+P0-3A's SQLite outbox is cross-process transactional for task state, but publication into JSONL is not cross-process serialized. `TaskService.flush_audit_events()` scans the full JSONL file for stable event IDs and `AuditLog.record()` repeats a scan while holding only its own instance lock. Separate processes can both observe an event as absent before either append completes, append duplicate event IDs, race ordering, or disagree about publication status. The current implementation has no OS file lock, named mutex, global sequencer, audit database transaction, or external queue. Same-process replay tests do not establish simultaneous multi-process publisher safety.
+
 ### ApprovalGrant authentication
 
-P0-3A adds approval source semantics and a persistent task path. `ApprovalGrant` rejects inconsistent human/SYSTEM source combinations and all AI grants. `TaskService` persists the canonical request digest, task, subject, approval source, expiry, and consumption state in SQLite. In `ProjectRuntime`, `PermissionEngine` delegates a persistent task approval to `TaskService`, which atomically consumes the grant and changes `APPROVED` to `RUNNING`.
+P0-3A adds approval source semantics and a persistent task path. After the review fix, `ApprovalGrant` means human-originated approval intent only. It accepts only a `USER` actor and an unauthenticated local-user source. `SYSTEM`, `EXTERNAL_AI`, and `LOCAL_LLM` cannot construct a human grant under their actual actor kind. `AUTHENTICATED_HUMAN` and `authenticated=True` fail closed even for direct grant construction because no identity-proof provider exists. Deterministic system authorization remains a `PermissionDecision` produced by policy and is not recorded as human approval.
+
+`TaskService` persists the canonical request digest, task, subject, approval source, expiry, and consumption state in SQLite. In `ProjectRuntime`, `PermissionEngine` delegates a persistent task approval to `TaskService`, which atomically consumes the grant and changes `APPROVED` to `RUNNING`.
 
 This closes restart replay and concurrent double-consumption for the persistent task path. The digest binding is still useful **only if the grant issuer is authentic**. Today:
 
@@ -295,7 +300,7 @@ Current result: **False for the repository as a whole. Partially true for select
 | `FileSystemService.list_files/read_file/write_file` | YES | Boundary rejection and allowed operations are audited. TOCTOU remains. |
 | `ControlledExecutionService.run` initial process | YES | Initial executable launch is authorized. Process behavior is not mediated afterward. |
 | `TaskService.run_command_task` | YES, delegated | It invokes only `ControlledExecutionService`; persistent approval consumption claims `RUNNING` atomically. |
-| Persistent task state/approval mutation | Task policy boundary | SQLite state methods do not perform filesystem/process operations; actor/request/grant bindings are checked by `TaskService`. |
+| Persistent task state/approval mutation | Task policy boundary | `ProjectRuntime` exposes `TaskService`, not its repository. Generic repository transitions reject `APPROVED` and `RUNNING`; dedicated transactions enforce grant issuance and consumption. |
 | Declared non-denied network request | YES, decision only | No OS network enforcement; no started/finished network lifecycle. |
 | `ControlledExecutionService.cancel` | NO | No actor or capability check. |
 | `AuditLog.record/events` | NO | Directly callable infrastructure API. |
@@ -307,7 +312,7 @@ Current result: **False for the repository as a whole. Partially true for select
 | Evolution execution and Git workflows | NO | Direct process, filesystem, and Git operations. |
 | Orchestrator proposal/state writes | NO | Direct filesystem and legacy service calls. |
 
-`ProjectRuntime` now composes the P0-3A task repository and service, but it is still not a mandatory application boundary. No production CLI path instantiates the new runtime; legacy privileged paths remain. Python visibility conventions such as `_atomic_write` and `_terminate_process_tree` are not security controls.
+`ProjectRuntime` now exposes `tasks` as the official task control plane and keeps the repository as a private-by-convention `TaskService` dependency. Repository types are not exported from the top-level `apos.core` API. This narrows accidental adapter bypass but is not a security boundary against malicious in-process Python, which can import infrastructure modules or inspect private attributes. No production CLI path instantiates the new runtime; legacy privileged paths remain.
 
 ### TOCTOU analysis
 
@@ -384,6 +389,7 @@ The child inherits the APOS process token. If APOS runs as an administrator, the
 - `AuditLog._lock` serializes threads using one `AuditLog` instance only.
 - `ControlledExecutionService._project_lock` serializes one service instance only.
 - Multiple runtimes and processes have independent locks.
+- Stable task-event IDs and SQLite outbox state do not prevent two processes from racing the JSONL lookup/append boundary.
 - No Windows range lock, lock file with verified ownership, named mutex, or transactional store coordinates audit or project operations.
 - `os.replace()` can fail when Windows sharing modes deny replacement and does not prevent path substitution before the call.
 
@@ -400,7 +406,10 @@ The following are real but narrowly scoped guarantees when callers use the P0-2/
 - Persisted `RUNNING` tasks become `RECOVERY_REQUIRED` at startup and are never automatically re-executed.
 - Persistent task requests require their task approval even when the capability policy otherwise returns `ALLOW`.
 - P0-3A rejects AI/SYSTEM human approval actions and keeps `AUTHENTICATED_HUMAN` unavailable.
-- External-AI and local-LLM actor kinds cannot appear as `approved_by` in a normally constructed `ApprovalGrant`.
+- `ApprovalGrant` accepts only a `USER` approver; SYSTEM authorization is represented separately by `PermissionDecision`.
+- `AUTHENTICATED_HUMAN` fails closed during direct grant construction as well as at the task boundary.
+- `ProjectRuntime` exposes `TaskService`, not `TaskRepository`, as the official task interaction path.
+- Generic repository transitions cannot enter `APPROVED` or `RUNNING`; those states require dedicated approval transactions.
 - Core file APIs reject lexical absolute/traversal paths and stable resolved escapes.
 - Default core file APIs deny configured secret names and `.apos`/`.git` paths.
 - Command assessment requires an explicitly trusted resolved executable path.
@@ -428,6 +437,7 @@ The current implementation does not guarantee:
 - authenticated approval issuance and replay protection outside the persistent P0-3A task path;
 - a mandatory application-wide authorization gateway;
 - cross-process project serialization;
+- cross-process JSONL audit deduplication, ordering, and exactly-once publication;
 - TOCTOU-resistant path or executable identity;
 - protection of host credentials available outside environment variables; or
 - safe remote exposure to an untrusted external AI.
@@ -606,15 +616,19 @@ The following current tests support limited security assumptions:
 | `tests/test_core_security.py::PermissionEngineTests::test_allows_explicit_safe_capability_and_denies_missing_rule` | Missing policy rule fails closed. | Actor/resource-aware policy. |
 | `...::test_risky_action_requires_matching_trusted_approval` | Exact grant and in-memory one-time consumption. | Trusted issuance and durable replay defense. |
 | `...::test_external_ai_cannot_issue_approval` | Dataclass rejects an `EXTERNAL_AI` approver label. | A caller forging a `USER` label. |
+| `...::test_system_actor_cannot_issue_human_approval` | `SYSTEM` cannot construct a human `ApprovalGrant`. | Authentication of a caller that self-labels as `USER`. |
+| `...::test_authenticated_human_grant_fails_closed_without_identity_proof` | Direct authenticated-human grant construction fails closed. | Real human authentication. |
+| `...::test_system_authorization_is_a_policy_decision_not_an_approval_grant` | Policy `ALLOW` remains a `PermissionDecision`, separate from human approval. | Policy-store authenticity and actor-aware policy. |
 | `...::test_policy_error_fails_closed` | Policy exception becomes deny. | Availability and authenticated policy storage. |
 | `...::test_allowed_operation_records_full_lifecycle_and_correlation` | Expected audit event sequence and correlation. | Log authenticity and immutability. |
 | `...::test_audit_redacts_sensitive_keys_inline_tokens_and_known_values` | Selected redaction patterns. | Complete data-loss prevention. |
-| `tests/test_core_runtime.py::ProjectRuntimeTests::test_composes_one_project_scoped_runtime_and_tool_registry` | Core services share one project in that instance. | Mandatory use by CLI/adapters. |
+| `tests/test_core_runtime.py::ProjectRuntimeTests::test_composes_one_project_scoped_runtime_and_tool_registry` | Core services share one project; runtime exposes `tasks` without a public repository field or top-level repository export. | Malicious in-process introspection or mandatory use by every adapter. |
 | `tests/test_core_tasks.py::PersistentTaskTests::test_consumed_approval_cannot_be_reused_after_restart` | Persistent approval consumption survives restart. | Human identity authenticity or DB tamper resistance. |
+| `...::test_repository_transition_cannot_replace_approval_transactions` | Generic persistence transitions cannot enter `APPROVED` or `RUNNING`. | Malicious direct SQL or same-user database tampering. |
 | `...::test_two_workers_cannot_consume_one_approval_or_start_one_task_twice` | SQLite serializes two concurrent task claims. | Multi-host databases or OS process containment. |
 | `...::test_running_task_recovers_without_automatic_execution` | Startup changes `RUNNING` to `RECOVERY_REQUIRED` without replay. | Whether an old detached OS process still survives. |
 | `...::test_authenticated_human_source_is_explicitly_unimplemented` | The default boundary rejects authenticated-human claims. | Real human authentication. |
-| `...::test_runtime_execution_consumes_persistent_approval_before_process_start` | Runtime command tasks use persistent consumption and controlled execution. | OS sandboxing or trusted-interpreter confinement. |
+| `...::test_runtime_execution_consumes_persistent_approval_before_process_start` | Direct task execution without approval is denied; the official service path consumes persistent approval before controlled execution. | OS sandboxing, cross-process audit publication, or trusted-interpreter confinement. |
 
 Tests may skip link coverage when Windows cannot create a symlink or junction. None of the current tests establishes an adversarial OS sandbox.
 

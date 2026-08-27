@@ -10,7 +10,6 @@ from .permissions import AuthorizationService, PermissionEngine, PermissionPolic
 from .tasks import (
     HumanApprovalBoundary,
     SQLiteTaskRepository,
-    TaskRepository,
     TaskService,
 )
 from .tools import ToolRegistry, core_tool_registry
@@ -28,7 +27,6 @@ class ProjectRuntime:
     filesystem: FileSystemService
     execution: ControlledExecutionService
     tools: ToolRegistry
-    task_repository: TaskRepository
     tasks: TaskService
 
     @classmethod
@@ -58,6 +56,7 @@ class ProjectRuntime:
         authorization = AuthorizationService(permission_engine, audit_log)
         filesystem = FileSystemService(workspace, authorization)
         execution = ControlledExecutionService(workspace, authorization, command_policy)
+        tasks._bind_execution_service(execution)
         return cls(
             workspace=workspace,
             permission_engine=permission_engine,
@@ -66,6 +65,5 @@ class ProjectRuntime:
             filesystem=filesystem,
             execution=execution,
             tools=core_tool_registry(),
-            task_repository=task_repository,
             tasks=tasks,
         )

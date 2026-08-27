@@ -14,8 +14,9 @@ The implementation is based on the P0-2 `master` state and preserves all previou
 ProjectRuntime
 |-- ProjectWorkspace
 |-- AuditLog
-|-- SQLiteTaskRepository
-|-- TaskService
+|-- TaskService (official task control plane)
+|   |-- _repository: SQLiteTaskRepository (infrastructure detail)
+|   `-- _execution_service: ControlledExecutionService
 |-- PermissionEngine
 |   `-- persistent approval consumer: TaskService
 |-- AuthorizationService
@@ -24,9 +25,11 @@ ProjectRuntime
 `-- ToolRegistry
 ```
 
-`TaskService` never launches a process or edits a project file directly. `run_command_task()` delegates only to the existing `ControlledExecutionService`, whose process launch still passes through `AuthorizationService` and `PermissionEngine`.
+`ProjectRuntime` does not expose `task_repository`. Its official task interaction path is `ProjectRuntime.tasks`, and the service keeps its repository under the private-by-convention `_repository` attribute. Python does not provide a security-grade private boundary, so this is an API and architecture boundary rather than protection against malicious in-process code.
 
-The domain layer depends on the `TaskRepository` protocol. SQLite is one implementation and can be replaced without changing task state or approval semantics.
+`TaskService.run_command_task()` uses the `ControlledExecutionService` bound by the runtime composition root. Adapters do not supply an executor. The process launch still passes through `AuthorizationService` and `PermissionEngine`.
+
+The domain layer depends on the `TaskRepository` protocol. SQLite is one implementation and can be replaced without changing task state or approval semantics. Repository types remain importable from `apos.core.tasks` for infrastructure construction and persistence tests, but are not exported from the top-level `apos.core` API.
 
 ## Task State Machine
 
@@ -141,16 +144,15 @@ Approval sources are explicit:
 
 - `UNAUTHENTICATED_USER_REQUEST`
 - `AUTHENTICATED_HUMAN`
-- `SYSTEM`
-- `AI`
 
-P0-3A supplies `LocalUnauthenticatedHumanApprovalBoundary`. It permits only an explicit local `USER` action marked `UNAUTHENTICATED_USER_REQUEST`.
+`ApprovalGrant` represents human-originated approval intent only. It cannot be issued by `SYSTEM`, `EXTERNAL_AI`, or `LOCAL_LLM`. A deterministic policy result is a `PermissionDecision` and is system authorization, not human approval. A policy `ALLOW` therefore does not create, imitate, or consume an `ApprovalGrant`, except that an existing persistent task still independently requires its one-time task approval.
+
+P0-3A supplies `LocalUnauthenticatedHumanApprovalBoundary`. It permits only an explicit local `USER` action marked `UNAUTHENTICATED_USER_REQUEST`. This records a local user request but does not prove who the human is.
 
 It rejects:
 
-- `EXTERNAL_AI`, `LOCAL_LLM`, and `SYSTEM` actors attempting to issue human approval;
-- `AI` and `SYSTEM` approval sources at the human boundary; and
-- `AUTHENTICATED_HUMAN` or `authenticated=True`, because identity proof is not implemented.
+- `EXTERNAL_AI`, `LOCAL_LLM`, and `SYSTEM` actors attempting to issue human approval; and
+- `AUTHENTICATED_HUMAN` or `authenticated=True`, including direct `ApprovalGrant` construction, because identity proof is not implemented.
 
 This local boundary is not password authentication, OS identity proof, MFA, a signature, or non-repudiation. It must not be exposed as a remote approval API.
 
@@ -178,6 +180,8 @@ No process is assumed alive and no operation is automatically re-executed. Recov
 
 Task events are first committed to the SQLite outbox. Startup and later task operations replay unpublished events to `AuditLog` using stable event IDs. This reduces state/audit gaps, but the JSONL audit file remains subject to the P0-2 integrity limitations documented in `SECURITY_THREAT_MODEL.md`.
 
+SQLite transactions protect task/outbox state across local processes sharing the database. Audit publication does not have the same guarantee: event lookup scans the JSONL file, while deduplication and append locking are process-local. Two processes can race between lookup and append, duplicate a stable event ID, or produce ordering ambiguity. No OS file lock, global sequencer, external queue, or audit database is implemented. Current tests cover same-process replay and runtime restart behavior, not simultaneous cross-process JSONL writers.
+
 ## Concurrency Model
 
 Every state-changing repository operation starts a SQLite `BEGIN IMMEDIATE` transaction. The task row also has an optimistic `version`.
@@ -189,7 +193,7 @@ Approval consumption uses conditional updates:
 
 Two workers racing on one task are serialized by SQLite. Exactly one can consume the approval and claim `RUNNING`; the other observes a consumed approval or a non-approved task and cannot start execution.
 
-This protects task and approval state across threads, runtime instances, and local processes sharing the SQLite file. It does not turn the existing P0-2 execution lock or JSONL audit lock into a global OS-level lock.
+This protects task and approval state across threads, runtime instances, and local processes sharing the SQLite file. It does not turn the existing P0-2 execution lock or JSONL audit lock into a global OS-level lock. Cross-process audit publication remains unresolved.
 
 ## Audit Integration
 
@@ -215,10 +219,21 @@ Events carry stable task-event ID, task ID, request ID, optional approval ID, ca
 
 `ProjectRuntime.create()` initializes the task store, performs crash recovery, publishes pending audit events, and supplies `TaskService` as the `PermissionEngine` persistent approval consumer.
 
+The official adapter path is:
+
+```text
+External Adapter -> ProjectRuntime -> TaskService -> TaskRepository
+                                      |
+                                      -> AuthorizationService
+                                         -> ControlledExecutionService
+```
+
+`ProjectRuntime.task_repository` and top-level repository exports are intentionally absent. Persistence tests may instantiate `SQLiteTaskRepository` directly from `apos.core.tasks`. This is not a claim that malicious Python code in the APOS process cannot inspect private attributes.
+
 `TaskService.run_command_task()`:
 
 1. verifies task actor, state, request ID, and approval reference;
-2. calls `ControlledExecutionService.run()` with the persisted grant;
+2. calls the runtime-bound `ControlledExecutionService.run()` with the persisted grant;
 3. relies on `AuthorizationService` and `PermissionEngine` for exact request authorization and atomic approval consumption;
 4. maps the execution result to `SUCCEEDED`, `FAILED`, or confirmed `CANCELLED`.
 
@@ -238,6 +253,8 @@ If a crash occurs after approval consumption but before completion, startup chan
 | Grant is not execution | `APPROVED`, `APPROVAL_CONSUMED`, and `RUNNING` are distinct state/events. |
 | Explicit transitions only | `TaskStateMachine` rejects all undefined transitions. |
 | No new privileged bypass | Command task coordination calls only `ControlledExecutionService`. |
+| Repository is not the runtime control plane | Runtime exposes `tasks`, not `task_repository`; generic repository transitions cannot enter `APPROVED` or `RUNNING`. |
+| System authorization is not human approval | Policy `PermissionDecision` and human `ApprovalGrant` have separate meanings; AI/SYSTEM cannot construct human grants. |
 | OS sandbox limits remain explicit | No sandbox claim is made. |
 | Human authentication remains unimplemented | `AUTHENTICATED_HUMAN` is rejected by the default boundary. |
 
@@ -245,7 +262,7 @@ These invariants apply to the P0-3A persistent task path. Legacy APOS paths that
 
 ## Tests Added
 
-`tests/test_core_tasks.py` contains 21 tests covering:
+The original P0-3A task suite contains 21 tests. The review fix adds four security/architecture tests across task and permission suites, covering:
 
 - creation, uniqueness, persistence, and legal/illegal transitions;
 - WAITING and APPROVED restart recovery;
@@ -260,14 +277,20 @@ These invariants apply to the P0-3A persistent task path. Legacy APOS paths that
 - corrupted SQLite detection;
 - RUNNING recovery without automatic execution; and
 - real `ProjectRuntime` to `ControlledExecutionService` integration.
+- repository transition rejection for `APPROVED` and `RUNNING`;
+- SYSTEM approval-grant rejection;
+- authenticated-human fail-closed behavior for direct grant construction; and
+- system authorization as a policy decision rather than a human grant.
 
 ## Verification Results
 
 - Existing tests before P0-3A: 95
-- New P0-3A tests: 21
-- Total: 116
-- Final full-suite result: 116 passed in 234.32 seconds
-- Post-hardening focused regression: 42 passed
+- New P0-3A tests before review fix: 21
+- P0-3A review-fix tests: 4
+- Review-fix new-test result: 4 passed, 2 subtests passed in 0.11 seconds
+- Total: 120
+- Final full-suite result: 120 passed, 5 subtests passed in 237.82 seconds
+- Review-fix focused regression: 36 passed, 5 subtests passed
 - Secret/redaction verification: 4 passed
 - `compileall`: passed
 - `git diff --check`: passed
@@ -302,6 +325,7 @@ None.
 - Legacy CLI/kernel/evolution/Git/Ollama paths are not migrated to the persistent runtime.
 - SQLite protects state consistency but not a malicious process with the same OS user and direct database-file access.
 - JSONL audit integrity remains non-cryptographic and lacks a cross-process writer lock.
+- Stable audit event deduplication uses a JSONL scan and process-local locking; concurrent publishers can race or duplicate an event ID.
 - Approval revocation, authenticated signatures, durable remote identity, and multi-host coordination are not implemented.
 - P0-3A provides no automatic task retry. `retry_count` is persisted for future explicitly governed retry design.
 

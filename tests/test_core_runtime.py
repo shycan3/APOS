@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import apos.core as core_api
 from apos.core import (
     Actor,
     ActorKind,
@@ -10,6 +11,7 @@ from apos.core import (
     Decision,
     ProjectRuntime,
     StaticPermissionPolicy,
+    TaskService,
 )
 
 
@@ -32,6 +34,11 @@ class ProjectRuntimeTests(unittest.TestCase):
 
             self.assertTrue(result.success, result.to_dict())
             self.assertEqual(runtime.workspace.project_id, runtime.audit_log.workspace.project_id)
+            self.assertIsInstance(runtime.tasks, TaskService)
+            self.assertFalse(hasattr(runtime, "task_repository"))
+            self.assertFalse(hasattr(runtime.tasks, "repository"))
+            self.assertFalse(hasattr(core_api, "TaskRepository"))
+            self.assertFalse(hasattr(core_api, "SQLiteTaskRepository"))
             self.assertEqual(tools["filesystem.read"].capability, Capability.PROJECT_READ)
             self.assertEqual(tools["execution.run"].capability, Capability.PROCESS_EXECUTE)
             self.assertTrue(all(definition.project_scoped for definition in tools.values()))

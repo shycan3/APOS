@@ -25,13 +25,13 @@ from apos.core import (
     ProjectWorkspace,
     ResourceLimits,
     RiskLevel,
-    SQLiteTaskRepository,
     StaticPermissionPolicy,
     TaskError,
     TaskService,
     TaskState,
     TaskStateMachine,
 )
+from apos.core.tasks import SQLiteTaskRepository
 
 
 class PersistentTaskTests(unittest.TestCase):
@@ -247,6 +247,31 @@ class PersistentTaskTests(unittest.TestCase):
 
         self.assertEqual(invalid.exception.code, ErrorCode.INVALID_TASK_TRANSITION)
 
+    def test_repository_transition_cannot_replace_approval_transactions(self):
+        request = self._waiting()
+
+        with self.assertRaises(TaskError) as approved_bypass:
+            self.repository.transition(
+                "task-1",
+                TaskState.APPROVED,
+                actor=self.user,
+                event_types=("TASK_APPROVED",),
+            )
+        self.assertEqual(approved_bypass.exception.code, ErrorCode.INVALID_TASK_TRANSITION)
+
+        grant = self._approve(request).to_grant()
+        with self.assertRaises(TaskError) as running_bypass:
+            self.repository.transition(
+                "task-1",
+                TaskState.RUNNING,
+                actor=self.actor,
+                event_types=("TASK_STARTED",),
+            )
+
+        self.assertEqual(running_bypass.exception.code, ErrorCode.INVALID_TASK_TRANSITION)
+        self.assertIsNone(self.tasks.get_approval("task-1").consumed_at)
+        self.assertEqual(self.tasks.get_task("task-1").state, TaskState.APPROVED)
+
     def test_persistent_task_requires_approval_even_when_capability_policy_allows(self):
         request = self._waiting()
         engine = PermissionEngine(
@@ -264,16 +289,12 @@ class PersistentTaskTests(unittest.TestCase):
 
     def test_ai_and_system_cannot_issue_human_approval(self):
         request = self._waiting()
-        for kind, source in (
-            (ActorKind.EXTERNAL_AI, ApprovalSource.AI),
-            (ActorKind.SYSTEM, ApprovalSource.SYSTEM),
-        ):
+        for kind in (ActorKind.EXTERNAL_AI, ActorKind.LOCAL_LLM, ActorKind.SYSTEM):
             with self.subTest(kind=kind):
                 with self.assertRaises(TaskError) as denied:
                     self._approve(
                         request,
                         approved_by=Actor(kind, f"{kind.value.lower()}-issuer"),
-                        source=source,
                     )
                 self.assertEqual(denied.exception.code, ErrorCode.PERMISSION_DENIED)
 
@@ -463,6 +484,15 @@ class RuntimeTaskIntegrationTests(unittest.TestCase):
             runtime.tasks.create_task(permission_request, description="Run approved Python")
             runtime.tasks.queue_task(command.task_id, actor=actor)
             runtime.tasks.request_approval(command.task_id, actor=actor)
+            direct = runtime.execution.run(command)
+
+            self.assertFalse(direct.success)
+            self.assertEqual(direct.error.code, ErrorCode.PERMISSION_REQUIRED)
+            self.assertEqual(
+                runtime.tasks.get_task(command.task_id).state,
+                TaskState.WAITING_APPROVAL,
+            )
+
             approval = runtime.tasks.grant_approval(
                 command.task_id,
                 action=ApprovalAction(
@@ -475,7 +505,7 @@ class RuntimeTaskIntegrationTests(unittest.TestCase):
                 ),
             )
 
-            result = runtime.tasks.run_command_task(command, runtime.execution)
+            result = runtime.tasks.run_command_task(command)
 
             self.assertTrue(result.success, result.to_dict())
             self.assertEqual(runtime.tasks.get_task(command.task_id).state, TaskState.SUCCEEDED)
