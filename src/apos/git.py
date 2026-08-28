@@ -94,7 +94,15 @@ class GitClient:
     def diff(self) -> str:
         return self.run(["diff"], check=False).stdout
 
-    def commit(self, files: list[str], message: str) -> str:
+    def commit(
+        self,
+        files: list[str],
+        message: str,
+        *,
+        patch_digest: str | None = None,
+        task_id: str | None = None,
+        attempt_number: int | None = None,
+    ) -> str:
         if not files:
             raise GitError("no files to commit")
         self.run(["add", "--", *files])

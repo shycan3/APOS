@@ -51,8 +51,24 @@ class ControlledGitClient:
     def diff(self) -> str:
         return self._legacy.diff()
 
-    def commit(self, files: list[str], message: str) -> str:
-        return self._legacy.commit(files, message)
+    def commit(
+        self,
+        files: list[str],
+        message: str,
+        *,
+        patch_digest: str | None = None,
+        task_id: str | None = None,
+        attempt_number: int | None = None,
+    ) -> str:
+        return self._translate(
+            lambda: self.session.commit(
+                files,
+                message,
+                patch_digest=patch_digest,
+                task_id=task_id,
+                attempt_number=attempt_number,
+            )
+        )
 
     def run(
         self,

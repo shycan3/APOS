@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 from time import perf_counter
-from typing import Any, BinaryIO, Mapping
+from typing import Any, BinaryIO, Callable, Mapping
 from uuid import uuid4
 
 from .audit import AuditEvent, AuditStatus, Redactor
@@ -35,6 +35,21 @@ class NetworkPolicy(str, Enum):
     DENIED = "NETWORK_DENIED"
     ALLOWED = "NETWORK_ALLOWED"
     APPROVAL_REQUIRED = "NETWORK_APPROVAL_REQUIRED"
+
+
+class PreExecutionGuardError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: ErrorCode = ErrorCode.PERMISSION_DENIED,
+        recovery_required: bool = False,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.recovery_required = recovery_required
+        self.details = dict(details or {})
 
 
 @dataclass(frozen=True)
@@ -64,6 +79,8 @@ class CommandRequest:
     capability: Capability = Capability.PROCESS_EXECUTE
     request_id: str = field(default_factory=lambda: uuid4().hex)
     task_id: str | None = None
+    semantic_metadata: Mapping[str, Any] = field(default_factory=dict)
+    pre_execution_guard: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         if not self.executable.strip():
@@ -351,6 +368,7 @@ class ControlledExecutionService:
                 "output_limit_bytes_per_stream": request.limits.max_output_bytes_per_stream,
                 "shell": False,
             }
+            | _semantic_metadata(request.semantic_metadata)
             | _stdin_metadata(request.stdin_text),
             request_id=request.request_id,
             task_id=request.task_id,
@@ -421,6 +439,29 @@ class ControlledExecutionService:
             network_denied = self._authorization_failure(network)
             if network_denied:
                 return network_denied
+
+        if request.pre_execution_guard is not None:
+            try:
+                request.pre_execution_guard()
+            except PreExecutionGuardError as exc:
+                return ToolResult.fail(
+                    exc.code,
+                    str(exc),
+                    details={
+                        "pre_execution_guard": "failed",
+                        "recovery_required": exc.recovery_required,
+                        **exc.details,
+                    },
+                )
+            except Exception as exc:
+                return ToolResult.fail(
+                    ErrorCode.INTERNAL_ERROR,
+                    f"pre-execution guard failed: {type(exc).__name__}",
+                    details={
+                        "pre_execution_guard": "failed",
+                        "recovery_required": True,
+                    },
+                )
 
         if not self._project_lock.acquire(blocking=False):
             return self._authorized_failure(
@@ -670,3 +711,13 @@ def _stdin_metadata(value: str | None) -> dict[str, str]:
     if digest is None:
         return {}
     return {"stdin_digest": digest}
+
+
+def _semantic_metadata(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not value:
+        return {}
+    metadata = dict(value)
+    return {
+        "semantic_metadata": metadata,
+        "semantic_digest": _mapping_digest(metadata),
+    }

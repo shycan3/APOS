@@ -10,6 +10,7 @@ from .execution import (
     CommandRequest,
     ControlledExecutionService,
     NetworkPolicy,
+    PreExecutionGuardError,
     ResourceLimits,
 )
 from .permissions import Actor, ApprovalSource, Capability
@@ -33,6 +34,8 @@ class GitSnapshot:
     dirty: bool
     changed_files: tuple[str, ...] = ()
     staged_files: tuple[str, ...] = ()
+    index_tree: str | None = None
+    staged_diff_digest: str | None = None
     patch_digest: str | None = None
     expected_changed_paths: tuple[str, ...] = ()
 
@@ -43,6 +46,8 @@ class GitSnapshot:
             "dirty": self.dirty,
             "changed_files": list(self.changed_files),
             "staged_files": list(self.staged_files),
+            "index_tree": self.index_tree,
+            "staged_diff_digest": self.staged_diff_digest,
             "patch_digest": self.patch_digest,
             "expected_changed_paths": list(self.expected_changed_paths),
         }
@@ -145,6 +150,164 @@ class GitExecutionSession:
             expected_paths=expected_paths,
             patch_digest=patch_digest,
         )
+
+    def commit(
+        self,
+        files: list[str],
+        message: str,
+        *,
+        patch_digest: str | None = None,
+        task_id: str | None = None,
+        attempt_number: int | None = None,
+    ) -> str:
+        expected_paths = tuple(sorted(dict.fromkeys(files)))
+        if not expected_paths:
+            raise GitExecutionError("no files to commit")
+        if not message:
+            raise GitExecutionError("commit message is required")
+
+        before = self._snapshot(expected_paths=expected_paths, patch_digest=patch_digest)
+        if before.staged_files:
+            raise GitExecutionError(
+                "pre-existing staged changes must be committed or unstaged before APOS can commit"
+            )
+
+        context = {
+            "task_id": task_id,
+            "attempt_number": attempt_number,
+            "patch_digest": patch_digest,
+            "expected_changed_paths": list(expected_paths),
+            "commit_message_digest": self._text_digest(message),
+        }
+        add_task_id = f"git-index:{uuid4().hex}"
+        add_result = self._run_git_task(
+            ("add", "--", *expected_paths),
+            capability=Capability.GIT_INDEX_WRITE,
+            task_id=add_task_id,
+            description="Stage APOS commit changes",
+            metadata={
+                "git_operation": "stage_commit_changes",
+                "snapshot_before": before.to_dict(),
+                **context,
+            },
+            semantic_metadata={
+                "git_operation": "stage_commit_changes",
+                "branch": before.branch,
+                "head_before": before.head,
+                **context,
+            },
+            approval_note="Local apos run invocation approved this exact Git index mutation.",
+            approval_required_message="persistent human approval is required before Git index mutation",
+        )
+        try:
+            after_add = self._snapshot(expected_paths=expected_paths, patch_digest=patch_digest)
+        except Exception as exc:
+            self._mark_git_recovery(add_task_id, f"git add state verification failed: {type(exc).__name__}")
+            raise GitExecutionError("git add state verification failed", recovery_required=True) from exc
+
+        if not add_result.success:
+            if self._same_snapshot(before, after_add):
+                self._complete_git_task(add_task_id, False, add_result)
+                raise GitExecutionError(self._message(add_result, "git add failed"))
+            self._mark_git_recovery(add_task_id, "git add failed after possible index mutation")
+            raise GitExecutionError(
+                self._message(add_result, "git add left index state ambiguous"),
+                recovery_required=True,
+            )
+
+        if not self._verified_add_state(before, after_add, expected_paths):
+            self._mark_git_recovery(add_task_id, "git add completed but staged state verification failed")
+            raise GitExecutionError("git add completed but staged state verification failed", recovery_required=True)
+        self._complete_git_task_or_recovery(
+            add_task_id,
+            True,
+            add_result,
+            "git add completed but task finalization failed",
+        )
+
+        diff_result = self._run_read("diff", "--cached", "--quiet")
+        diff_exit_code = self._exit_code(diff_result)
+        if diff_exit_code == 0:
+            raise GitExecutionError("no staged changes to commit")
+        if diff_exit_code != 1:
+            try:
+                after_diff = self._snapshot(expected_paths=expected_paths, patch_digest=patch_digest)
+            except Exception as exc:
+                raise GitExecutionError("cached diff state verification failed", recovery_required=True) from exc
+            if self._same_snapshot(after_add, after_diff):
+                raise GitExecutionError(self._message(diff_result, "git diff --cached --quiet failed"))
+            raise GitExecutionError(
+                self._message(diff_result, "git diff --cached --quiet left index state ambiguous"),
+                recovery_required=True,
+            )
+
+        staged = self._snapshot(expected_paths=expected_paths, patch_digest=patch_digest)
+        if staged.index_tree is None or staged.staged_diff_digest is None:
+            raise GitExecutionError("staged state could not be verified", recovery_required=True)
+        commit_context = {
+            **context,
+            "parent_head": staged.head,
+            "branch": staged.branch,
+            "staged_files": list(staged.staged_files),
+            "staged_diff_digest": staged.staged_diff_digest,
+            "index_tree": staged.index_tree,
+        }
+        commit_task_id = f"git-commit:{uuid4().hex}"
+        commit_result = self._run_git_task(
+            ("commit", "--no-verify", "-m", message),
+            capability=Capability.GIT_REF_WRITE,
+            task_id=commit_task_id,
+            description="Commit APOS task changes",
+            metadata={
+                "git_operation": "commit_task_changes",
+                "snapshot_before": staged.to_dict(),
+                **commit_context,
+            },
+            semantic_metadata={
+                "git_operation": "commit_task_changes",
+                **commit_context,
+            },
+            pre_execution_guard=self._commit_drift_guard(staged, expected_paths),
+            approval_note="Local apos run invocation approved this exact Git commit.",
+            approval_required_message="persistent human approval is required before Git commit",
+        )
+
+        if not commit_result.success and self._pre_execution_guard_failed(commit_result):
+            if self._pre_execution_guard_recovery_required(commit_result):
+                self._mark_git_recovery(commit_task_id, "pre-commit state could not be verified")
+                raise GitExecutionError(self._message(commit_result, "pre-commit drift guard failed"), recovery_required=True)
+            self._complete_git_task(commit_task_id, False, commit_result)
+            raise GitExecutionError(self._message(commit_result, "pre-commit drift guard rejected commit"))
+
+        try:
+            after_commit = self._snapshot(expected_paths=expected_paths, patch_digest=patch_digest)
+        except Exception as exc:
+            self._mark_git_recovery(commit_task_id, f"post-commit state verification failed: {type(exc).__name__}")
+            raise GitExecutionError("post-commit state verification failed", recovery_required=True) from exc
+
+        if not commit_result.success:
+            if staged.head == after_commit.head and self._same_index_state(staged, after_commit):
+                self._complete_git_task(commit_task_id, False, commit_result)
+                raise GitExecutionError(self._message(commit_result, "git commit failed"))
+            self._mark_git_recovery(commit_task_id, "git commit failed after possible ref or index mutation")
+            raise GitExecutionError(
+                self._message(commit_result, "git commit left repository state ambiguous"),
+                recovery_required=True,
+            )
+
+        if self._verified_commit_state(staged, after_commit, expected_paths, message):
+            self._complete_git_task_or_recovery(
+                commit_task_id,
+                True,
+                commit_result,
+                "git commit completed but task finalization failed",
+            )
+            if after_commit.head is None:
+                raise GitExecutionError("post-commit HEAD could not be verified", recovery_required=True)
+            return after_commit.head[:12]
+
+        self._mark_git_recovery(commit_task_id, "git commit completed but post-state verification failed")
+        raise GitExecutionError("git commit completed but post-state verification failed", recovery_required=True)
 
     def checkout_task_branch(self, branch: str) -> None:
         self._validate_branch_name(branch)
@@ -267,6 +430,8 @@ class GitExecutionSession:
             dirty=bool(status),
             changed_files=changed,
             staged_files=staged,
+            index_tree=self._index_tree() if staged else None,
+            staged_diff_digest=self._staged_diff_digest() if staged else None,
             patch_digest=patch_digest,
             expected_changed_paths=expected_paths,
         )
@@ -425,6 +590,56 @@ class GitExecutionSession:
         )
         return self.service.tasks.run_command_task(request, close_on_result=False)
 
+    def _run_git_task(
+        self,
+        args: tuple[str, ...],
+        *,
+        capability: Capability,
+        task_id: str,
+        description: str,
+        metadata: dict[str, object],
+        semantic_metadata: dict[str, object],
+        approval_note: str,
+        approval_required_message: str,
+        pre_execution_guard=None,
+    ) -> ToolResult[dict[str, object]]:
+        request = self._request(
+            args,
+            capability=capability,
+            request_id=uuid4().hex,
+            task_id=task_id,
+            semantic_metadata=semantic_metadata,
+            pre_execution_guard=pre_execution_guard,
+        )
+        self.service.tasks.create_command_task(
+            request,
+            description=description,
+            metadata=metadata,
+        )
+        self.service.tasks.queue_task(task_id, actor=self.actor)
+        self.service.tasks.request_approval(task_id, actor=self.actor)
+
+        permission_request = self.service.tasks.get_permission_request(task_id)
+        if self.approved_by is None:
+            return ToolResult.fail(
+                ErrorCode.PERMISSION_REQUIRED,
+                approval_required_message,
+                details={"task_id": task_id},
+            )
+
+        self.service.tasks.grant_approval(
+            task_id,
+            action=ApprovalAction(
+                request_id=permission_request.request_id,
+                request_digest=permission_request.digest(),
+                subject=self.actor,
+                approved_by=self.approved_by,
+                source=ApprovalSource.UNAUTHENTICATED_USER_REQUEST,
+                note=approval_note,
+            ),
+        )
+        return self.service.tasks.run_command_task(request, close_on_result=False)
+
     def _request(
         self,
         args: tuple[str, ...],
@@ -433,6 +648,8 @@ class GitExecutionSession:
         request_id: str,
         task_id: str | None = None,
         stdin_text: str | None = None,
+        semantic_metadata: dict[str, object] | None = None,
+        pre_execution_guard=None,
     ) -> CommandRequest:
         return CommandRequest(
             executable=self.service.git_executable,
@@ -446,6 +663,8 @@ class GitExecutionSession:
             limits=ResourceLimits(timeout_seconds=60, max_output_bytes_per_stream=64_000),
             request_id=request_id,
             task_id=task_id,
+            semantic_metadata=semantic_metadata or {},
+            pre_execution_guard=pre_execution_guard,
         )
 
     def _git_safety_args(self) -> tuple[str, ...]:
@@ -487,16 +706,137 @@ class GitExecutionSession:
             )
 
     def _mark_patch_recovery(self, task_id: str, reason: str) -> None:
-        current = self.service.tasks.get_task(task_id)
+        try:
+            current = self.service.tasks.get_task(task_id)
+        except TaskError:
+            return
         if current.state == TaskState.RUNNING:
-            self.service.tasks.mark_recovery_required(task_id, actor=self.actor, reason=reason)
+            try:
+                self.service.tasks.mark_recovery_required(task_id, actor=self.actor, reason=reason)
+            except TaskError:
+                return
         elif current.state == TaskState.APPROVED:
-            self.service.tasks.complete_task(
-                task_id,
-                actor=self.actor,
-                succeeded=False,
-                failure_information={"error_code": ErrorCode.INTERNAL_ERROR.value, "message": reason},
-            )
+            try:
+                self.service.tasks.complete_task(
+                    task_id,
+                    actor=self.actor,
+                    succeeded=False,
+                    failure_information={"error_code": ErrorCode.INTERNAL_ERROR.value, "message": reason},
+                )
+            except TaskError:
+                return
+
+    def _complete_git_task(self, task_id: str, succeeded: bool, result: ToolResult[dict[str, object]]) -> None:
+        self._complete_patch_task(task_id, succeeded, result)
+
+    def _complete_git_task_or_recovery(
+        self,
+        task_id: str,
+        succeeded: bool,
+        result: ToolResult[dict[str, object]],
+        recovery_message: str,
+    ) -> None:
+        try:
+            self._complete_git_task(task_id, succeeded, result)
+        except TaskError as exc:
+            self._mark_git_recovery(task_id, recovery_message)
+            raise GitExecutionError(recovery_message, recovery_required=True) from exc
+
+    def _mark_git_recovery(self, task_id: str, reason: str) -> None:
+        self._mark_patch_recovery(task_id, reason)
+
+    def _commit_drift_guard(self, approved: GitSnapshot, expected_paths: tuple[str, ...]):
+        def guard() -> None:
+            try:
+                live = self._snapshot(
+                    expected_paths=expected_paths,
+                    patch_digest=approved.patch_digest,
+                )
+            except Exception as exc:
+                raise PreExecutionGuardError(
+                    "pre-commit state could not be verified",
+                    recovery_required=True,
+                    details={"reason": type(exc).__name__},
+                ) from exc
+            if (
+                live.branch != approved.branch
+                or live.head != approved.head
+                or live.staged_files != approved.staged_files
+                or live.staged_diff_digest != approved.staged_diff_digest
+                or live.index_tree != approved.index_tree
+            ):
+                raise PreExecutionGuardError(
+                    "pre-commit state drifted after approval",
+                    details={
+                        "approved_branch": approved.branch,
+                        "live_branch": live.branch,
+                        "approved_head": approved.head,
+                        "live_head": live.head,
+                        "approved_staged_files": list(approved.staged_files),
+                        "live_staged_files": list(live.staged_files),
+                        "approved_staged_diff_digest": approved.staged_diff_digest,
+                        "live_staged_diff_digest": live.staged_diff_digest,
+                        "approved_index_tree": approved.index_tree,
+                        "live_index_tree": live.index_tree,
+                    },
+                )
+
+        return guard
+
+    @staticmethod
+    def _pre_execution_guard_failed(result: ToolResult[dict[str, object]]) -> bool:
+        if result.error is None:
+            return False
+        return result.error.details.get("pre_execution_guard") == "failed"
+
+    @staticmethod
+    def _pre_execution_guard_recovery_required(result: ToolResult[dict[str, object]]) -> bool:
+        if result.error is None:
+            return False
+        return bool(result.error.details.get("recovery_required"))
+
+    def _index_tree(self) -> str | None:
+        result = self._run_read("write-tree")
+        if not result.success:
+            return None
+        return str(result.data.get("stdout", "")).strip() or None
+
+    def _staged_diff_digest(self) -> str | None:
+        result = self._run_read("diff", "--cached", "--full-index", "--binary")
+        if not result.success:
+            return None
+        return self._text_digest(str(result.data.get("stdout", "")))
+
+    def _commit_parent(self, commit: str) -> str | None:
+        result = self._run_read("rev-list", "--parents", "-n", "1", commit)
+        if not result.success:
+            return None
+        parts = str(result.data.get("stdout", "")).strip().split()
+        if len(parts) != 2 or parts[0] != commit:
+            return None
+        return parts[1]
+
+    def _commit_tree(self, commit: str) -> str | None:
+        result = self._run_read("rev-parse", f"{commit}^{{tree}}")
+        if not result.success:
+            return None
+        return str(result.data.get("stdout", "")).strip() or None
+
+    def _commit_message(self, commit: str) -> str | None:
+        result = self._run_read("log", "-1", "--format=%B", commit)
+        if not result.success:
+            return None
+        return str(result.data.get("stdout", "")).rstrip("\n")
+
+    @staticmethod
+    def _exit_code(result: ToolResult[dict[str, object]]) -> int | None:
+        if result.success and result.data is not None:
+            return int(result.data.get("exit_code", 0))
+        if result.error is not None:
+            detail = result.error.details if isinstance(result.error.details, dict) else {}
+            exit_code = detail.get("exit_code")
+            return int(exit_code) if exit_code is not None else None
+        return None
 
     @staticmethod
     def _same_snapshot(before: GitSnapshot, after: GitSnapshot) -> bool:
@@ -505,7 +845,52 @@ class GitExecutionSession:
             and before.head == after.head
             and before.changed_files == after.changed_files
             and before.staged_files == after.staged_files
+            and before.index_tree == after.index_tree
+            and before.staged_diff_digest == after.staged_diff_digest
         )
+
+    @staticmethod
+    def _same_index_state(before: GitSnapshot, after: GitSnapshot) -> bool:
+        return (
+            before.staged_files == after.staged_files
+            and before.index_tree == after.index_tree
+            and before.staged_diff_digest == after.staged_diff_digest
+        )
+
+    @staticmethod
+    def _verified_add_state(before: GitSnapshot, after: GitSnapshot, expected_paths: tuple[str, ...]) -> bool:
+        expected = set(expected_paths)
+        staged = set(after.staged_files)
+        return (
+            before.branch == after.branch
+            and before.head == after.head
+            and not before.staged_files
+            and bool(staged)
+            and staged.issubset(expected)
+            and after.index_tree is not None
+            and after.staged_diff_digest is not None
+        )
+
+    def _verified_commit_state(
+        self,
+        before: GitSnapshot,
+        after: GitSnapshot,
+        expected_paths: tuple[str, ...],
+        message: str,
+    ) -> bool:
+        if before.branch != after.branch:
+            return False
+        if before.head is None or after.head is None or before.head == after.head:
+            return False
+        if self._commit_parent(after.head) != before.head:
+            return False
+        if self._commit_tree(after.head) != before.index_tree:
+            return False
+        if self._commit_message(after.head) != message:
+            return False
+        if set(after.staged_files) & set(expected_paths):
+            return False
+        return True
 
     @staticmethod
     def _verified_patch_state(
@@ -553,6 +938,10 @@ class GitExecutionSession:
     @staticmethod
     def _patch_digest(patch: str) -> str:
         return hashlib.sha256(patch.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _text_digest(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _patch_paths(patch: str) -> tuple[str, ...]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -172,10 +173,18 @@ class Kernel:
                     recorder.record_attempt(attempt)
                     if options.no_commit:
                         return self._finish(recorder, RunSummary("PASS", spec.task_id, branch, attempts, committed=False))
-                    commit_hash = self.git.commit(
+                    commit_status, commit_hash = self._commit_changes(
                         changed_by_patch,
                         f"APOS {spec.task_id}: {spec.display_title()}",
+                        spec=spec,
+                        attempt_number=attempt_number,
+                        attempts=attempts,
+                        recorder=recorder,
+                        branch=branch,
+                        test_results=test_results,
                     )
+                    if commit_status != "PASS":
+                        return self._finish(recorder, RunSummary(commit_status, spec.task_id, branch, attempts))
                     return self._finish(
                         recorder,
                         RunSummary("PASS", spec.task_id, branch, attempts, committed=True, commit_hash=commit_hash),
@@ -274,10 +283,19 @@ class Kernel:
                 recorder.record_attempt(attempt)
                 if options.no_commit:
                     return self._finish(recorder, RunSummary("PASS", spec.task_id, branch, attempts, committed=False))
-                commit_hash = self.git.commit(
+                commit_status, commit_hash = self._commit_changes(
                     changed_by_patch,
                     f"APOS {spec.task_id}: {spec.display_title()}",
+                    spec=spec,
+                    attempt_number=attempt_number,
+                    attempts=attempts,
+                    recorder=recorder,
+                    branch=branch,
+                    test_results=test_results,
+                    patch=response.patch,
                 )
+                if commit_status != "PASS":
+                    return self._finish(recorder, RunSummary(commit_status, spec.task_id, branch, attempts))
                 return self._finish(
                     recorder,
                     RunSummary("PASS", spec.task_id, branch, attempts, committed=True, commit_hash=commit_hash),
@@ -348,6 +366,49 @@ class Kernel:
             return f"{message}\n{rollback_message}", True
         recorder.record_rollback(attempt, "PASS", "failed attempt patch was rolled back")
         return message, False
+
+    def _commit_changes(
+        self,
+        changed_by_patch: list[str],
+        message: str,
+        *,
+        spec: TaskSpec,
+        attempt_number: int,
+        attempts: list[AttemptResult],
+        recorder: RunRecorder,
+        branch: str,
+        test_results: list[ExecutionResult],
+        patch: str | None = None,
+    ) -> tuple[str, str | None]:
+        try:
+            commit_hash = self.git.commit(
+                changed_by_patch,
+                message,
+                patch_digest=hashlib.sha256(patch.encode("utf-8")).hexdigest() if patch is not None else None,
+                task_id=spec.task_id,
+                attempt_number=attempt_number,
+            )
+        except GitAmbiguousStateError as exc:
+            commit_attempt = AttemptResult(
+                attempt_number,
+                "RECOVERY_REQUIRED",
+                f"commit requires recovery: {exc}",
+                test_results,
+            )
+            attempts.append(commit_attempt)
+            recorder.record_attempt(commit_attempt)
+            return "RECOVERY_REQUIRED", None
+        except GitError as exc:
+            commit_attempt = AttemptResult(
+                attempt_number,
+                "FAILED",
+                f"commit failed: {exc}",
+                test_results,
+            )
+            attempts.append(commit_attempt)
+            recorder.record_attempt(commit_attempt)
+            return "FAILED", None
+        return "PASS", commit_hash
 
     def _apply_file_replacement(
         self,

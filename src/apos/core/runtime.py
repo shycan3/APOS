@@ -82,6 +82,8 @@ class ProjectRuntime:
                 {
                     Capability.GIT_READ: Decision.ALLOW,
                     Capability.GIT_WORKTREE_WRITE: Decision.APPROVAL_REQUIRED,
+                    Capability.GIT_INDEX_WRITE: Decision.APPROVAL_REQUIRED,
+                    Capability.GIT_REF_WRITE: Decision.APPROVAL_REQUIRED,
                     Capability.GIT_ROLLBACK: Decision.APPROVAL_REQUIRED,
                 },
                 policy_id="production-local-git-phase-a-v1",
