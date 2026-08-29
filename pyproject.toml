@@ -8,7 +8,9 @@ version = "1.2.0"
 description = "AI Project Operating System local orchestration runtime"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "mcp>=2,<3",
+]
 
 [project.scripts]
 apos = "apos.cli:main"
