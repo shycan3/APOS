@@ -51,17 +51,15 @@ class ValidateControlPlaneTests(unittest.TestCase):
             self.assertEqual(len({event["request_id"] for event in events}), 1)
 
     def test_cli_adapter_does_not_reenter_legacy_validate_dependencies(self):
-        validation = Mock()
-        validation.validate.return_value = ToolResult.ok(
+        service = Mock()
+        service.validate_task.return_value = ToolResult.ok(
             {"path": "task.json", "task_id": "TASK-001", "title": "Control plane validation"}
         )
-        runtime = Mock(validation=validation)
         stdout = io.StringIO()
 
         with (
-            patch("apos.cli.ProjectRuntime.create_read_only", return_value=runtime) as create_runtime,
+            patch("apos.cli.APOSApplicationService", return_value=service) as service_factory,
             patch("apos.cli.TaskSpec.load", side_effect=AssertionError("legacy loader called")),
-            patch("apos.cli.Kernel", side_effect=AssertionError("legacy Kernel called")),
             patch("apos.cli.GitClient", side_effect=AssertionError("legacy GitClient called")),
             patch("apos.cli.subprocess.run", side_effect=AssertionError("direct subprocess called")),
             redirect_stdout(stdout),
@@ -69,12 +67,10 @@ class ValidateControlPlaneTests(unittest.TestCase):
             return_code = main(["validate", "task.json"])
 
         self.assertEqual(return_code, 0)
-        create_runtime.assert_called_once()
-        validation.validate.assert_called_once()
-        path, = validation.validate.call_args.args
-        actor = validation.validate.call_args.kwargs["actor"]
-        self.assertEqual(path, "task.json")
-        self.assertEqual(actor, Actor(ActorKind.USER, "local-cli"))
+        service_factory.assert_called_once()
+        service.validate_task.assert_called_once()
+        path, = service.validate_task.call_args.args
+        self.assertEqual(path, Path("task.json"))
         self.assertIn("TaskSpec 검증 완료", stdout.getvalue())
 
     def test_validate_does_not_recover_an_unrelated_running_task(self):

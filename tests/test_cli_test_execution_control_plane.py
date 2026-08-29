@@ -144,7 +144,7 @@ class RunTestExecutionControlPlaneTests(unittest.TestCase):
             with (
                 self._production_run_guards(root),
                 patch(
-                    "apos.cli.ProjectRuntime.create_local_test_execution",
+                    "apos.application.ProjectRuntime.create_local_test_execution",
                     return_value=denied_runtime,
                 ),
                 redirect_stderr(stderr),

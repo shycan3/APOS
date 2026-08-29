@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 from . import __version__
+from .application import APOSApplicationService
 from .benchmark import (
     BenchmarkError,
     BenchmarkRunOptions,
@@ -17,11 +18,7 @@ from .benchmark import (
     validate_benchmark_suite,
 )
 from .config import configured_coder_command, configured_ollama, ensure_project_memory, load_config, save_config
-from .controlled_git import ControlledGitClient
 from .core import (
-    Actor,
-    ActorKind,
-    ProjectRuntime,
     TaskError,
     WorkspaceViolation,
 )
@@ -36,10 +33,9 @@ from .evolution import (
     validate_evolution,
 )
 from .git import GitClient, GitError
-from .kernel import Kernel, KernelError, RunOptions
+from .kernel import KernelError, RunOptions
 from .models import SpecError, TaskSpec
 from .report import generate_quality_report
-from .runlog import list_run_logs, load_run_log
 
 
 class KoreanArgumentParser(argparse.ArgumentParser):
@@ -470,30 +466,23 @@ def _ollama_coder_command(model: str, binary: str, host: str) -> str:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    top = GitClient(Path.cwd()).ensure_repo()
-    root = top
-    git = GitClient(root)
-    config = load_config(root)
+    status = APOSApplicationService(Path.cwd()).get_status()
     print(f"APOS {__version__}")
-    print(f"프로젝트: {top}")
-    print(f"브랜치: {git.current_branch()}")
+    print(f"프로젝트: {status.root}")
+    print(f"브랜치: {status.branch}")
+    config = load_config(Path(status.root))
     command = config.get("local_coder", {}).get("command") or "<not configured>"
     print(f"로컬 코더: {command}")
-    status = git.status_porcelain().strip()
-    if status:
+    if status.status_porcelain:
         print("Git 상태:")
-        print(status)
+        print(status.status_porcelain)
     else:
         print("Git 상태: 깨끗함")
     return 0
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    runtime = ProjectRuntime.create_read_only(Path.cwd())
-    result = runtime.validation.validate(
-        str(args.taskspec),
-        actor=Actor(ActorKind.USER, "local-cli"),
-    )
+    result = APOSApplicationService(Path.cwd()).validate_task(args.taskspec)
     if not result.success:
         assert result.error is not None
         raise SpecError(f"{result.error.code.value}: {result.error.message}")
@@ -575,14 +564,8 @@ def cmd_refine(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    root = Path.cwd()
-    spec = TaskSpec.load(args.taskspec)
-    summary = Kernel(
-        root,
-        test_runner_factory=_local_test_runner,
-        git_client_factory=_local_git_client,
-    ).run_task(
-        spec,
+    summary = APOSApplicationService(Path.cwd()).run_task_file(
+        args.taskspec,
         RunOptions(
             coder_command=args.coder_command,
             max_attempts=args.max_attempts,
@@ -601,22 +584,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if summary.status == "PASS" else 2
 
 
-def _local_test_runner(root: Path):
-    runtime = ProjectRuntime.create_local_test_execution(root)
-    actor = Actor(ActorKind.USER, "local-cli")
-    return runtime.test_execution.bind(actor=actor, approved_by=actor)
-
-
-def _local_git_client(root: Path):
-    runtime = ProjectRuntime.create_local_git_phase_a(root)
-    actor = Actor(ActorKind.USER, "local-cli")
-    session = runtime.git_execution.bind(actor=actor, approved_by=actor)
-    return ControlledGitClient(root, session)
-
-
 def cmd_runs_list(args: argparse.Namespace) -> int:
-    root = GitClient(Path.cwd()).ensure_repo()
-    entries = list_run_logs(root, limit=args.limit)
+    entries = APOSApplicationService(Path.cwd()).list_runs(limit=args.limit)
     if args.json:
         print(json.dumps([entry.to_dict() for entry in entries], indent=2))
         return 0
@@ -632,9 +601,8 @@ def cmd_runs_list(args: argparse.Namespace) -> int:
 
 
 def cmd_runs_show(args: argparse.Namespace) -> int:
-    root = GitClient(Path.cwd()).ensure_repo()
     try:
-        detail = load_run_log(root, args.run_log)
+        detail = APOSApplicationService(Path.cwd()).get_run(args.run_log)
     except FileNotFoundError as exc:
         print(f"APOS 오류: {exc}", file=sys.stderr)
         return 1
