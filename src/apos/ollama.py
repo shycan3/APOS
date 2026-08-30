@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import re
 import subprocess
@@ -32,6 +33,48 @@ Rules:
 
 
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_REPAIR_OUTPUT_LIMIT = 12000
+APOS_PROTOCOL_RESPONSE_SCHEMA: dict[str, object] = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "patch"},
+                "patch": {"type": "string", "minLength": 1},
+            },
+            "required": ["type", "patch"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "file_replacement"},
+                "path": {"type": "string", "minLength": 1},
+                "content": {"type": "string"},
+            },
+            "required": ["type", "path", "content"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {
+                "type": {"const": "request_permission"},
+                "path": {"type": "string", "minLength": 1},
+                "permission": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["type", "path"],
+            "additionalProperties": False,
+        },
+    ],
+}
+
+
+@dataclass(frozen=True)
+class ProtocolRunResult:
+    protocol_output: str
+    first_output: str
+    repair_output: str = ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        output = run_ollama(
+        result = run_ollama_protocol(
             model=args.model,
             apos_prompt=apos_prompt,
             ollama_binary=args.ollama_binary,
@@ -65,14 +108,43 @@ def main(argv: list[str] | None = None) -> int:
         print(f"APOS Ollama adapter error: {exc}", file=sys.stderr)
         return 1
 
-    protocol_output = extract_protocol_output(output)
-    if not protocol_output:
+    if not result.protocol_output:
         print("APOS Ollama adapter error: model did not return a patch, file_replacement, or permission request", file=sys.stderr)
-        print(output, file=sys.stderr)
+        print(result.repair_output or result.first_output, file=sys.stderr)
         return 3
 
-    print(protocol_output, end="" if protocol_output.endswith("\n") else "\n")
+    print(result.protocol_output, end="" if result.protocol_output.endswith("\n") else "\n")
     return 0
+
+
+def run_ollama_protocol(
+    model: str,
+    apos_prompt: str,
+    ollama_binary: str,
+    ollama_host: str,
+    timeout_seconds: int,
+) -> ProtocolRunResult:
+    output = run_ollama(
+        model=model,
+        apos_prompt=apos_prompt,
+        ollama_binary=ollama_binary,
+        ollama_host=ollama_host,
+        timeout_seconds=timeout_seconds,
+    )
+    protocol_output = extract_protocol_output(output)
+    if protocol_output:
+        return ProtocolRunResult(protocol_output=protocol_output, first_output=output)
+
+    repair_output = repair_ollama_protocol_output(
+        model=model,
+        apos_prompt=apos_prompt,
+        invalid_output=output,
+        ollama_binary=ollama_binary,
+        ollama_host=ollama_host,
+        timeout_seconds=timeout_seconds,
+    )
+    repaired_protocol = extract_protocol_output(repair_output)
+    return ProtocolRunResult(protocol_output=repaired_protocol, first_output=output, repair_output=repair_output)
 
 
 def run_ollama(model: str, apos_prompt: str, ollama_binary: str, ollama_host: str, timeout_seconds: int) -> str:
@@ -83,6 +155,27 @@ def run_ollama(model: str, apos_prompt: str, ollama_binary: str, ollama_host: st
             prompt=prompt,
             ollama_host=ollama_host,
             timeout_seconds=timeout_seconds,
+        )
+    except RuntimeError:
+        return run_ollama_prompt(model=model, prompt=prompt, ollama_binary=ollama_binary, timeout_seconds=timeout_seconds)
+
+
+def repair_ollama_protocol_output(
+    model: str,
+    apos_prompt: str,
+    invalid_output: str,
+    ollama_binary: str,
+    ollama_host: str,
+    timeout_seconds: int,
+) -> str:
+    prompt = build_protocol_repair_prompt(apos_prompt, invalid_output)
+    try:
+        return run_ollama_generate(
+            model=model,
+            prompt=prompt,
+            ollama_host=ollama_host,
+            timeout_seconds=timeout_seconds,
+            json_format=APOS_PROTOCOL_RESPONSE_SCHEMA,
         )
     except RuntimeError:
         return run_ollama_prompt(model=model, prompt=prompt, ollama_binary=ollama_binary, timeout_seconds=timeout_seconds)
@@ -109,7 +202,7 @@ def run_ollama_generate(
     prompt: str,
     ollama_host: str,
     timeout_seconds: int,
-    json_format: bool = False,
+    json_format: bool | dict[str, object] = False,
 ) -> str:
     payload: dict[str, object] = {
         "model": model,
@@ -117,7 +210,7 @@ def run_ollama_generate(
         "stream": False,
     }
     if json_format:
-        payload["format"] = "json"
+        payload["format"] = "json" if json_format is True else json_format
     data = json.dumps(payload).encode("utf-8")
     url = ollama_host.rstrip("/") + "/api/generate"
     http_request = request.Request(
@@ -143,6 +236,40 @@ def run_ollama_generate(
 
 def build_model_prompt(apos_prompt: str) -> str:
     return f"{SYSTEM_PROMPT}\n\nAPOS TASK PROMPT JSON:\n{apos_prompt}\n"
+
+
+def build_protocol_repair_prompt(apos_prompt: str, invalid_output: str) -> str:
+    clipped_output = invalid_output.strip()
+    if len(clipped_output) > _REPAIR_OUTPUT_LIMIT:
+        clipped_output = clipped_output[-_REPAIR_OUTPUT_LIMIT:]
+    return f"""You are APOS Local Coder protocol repair.
+
+The previous model response did not satisfy the APOS local coder protocol.
+Convert the original task into exactly one valid APOS protocol response.
+
+Return only one JSON object and no prose, markdown, fences, or explanations.
+
+Allowed JSON objects:
+1. {{"type":"patch","patch":"valid unified diff patch"}}
+2. {{"type":"file_replacement","path":"path/from/task.allowed_files","content":"complete final file text"}}
+3. {{"type":"request_permission","path":"path","permission":"read","reason":"why the context is required"}}
+
+Rules:
+- The top-level JSON object must contain a "type" key with one of: "patch", "file_replacement", "request_permission".
+- Do not return an object with a "response", "message", "explanation", "code", or "tests" top-level key.
+- Do not return Python, JavaScript, or any other bare code block.
+- Do not return context diffs such as "1c1", "< old", "---", "> new".
+- Do not invent a target file from the previous invalid response.
+- Modify only files listed in task.allowed_files.
+- If you cannot produce a valid unified diff, use file_replacement for a file explicitly listed in task.allowed_files.
+- If required context is missing, return request_permission.
+
+ORIGINAL APOS TASK PROMPT JSON:
+{apos_prompt}
+
+PREVIOUS INVALID RESPONSE:
+{clipped_output}
+"""
 
 
 def extract_protocol_output(output: str) -> str:
@@ -178,7 +305,7 @@ def _extract_json(value: str) -> str:
         payload = _recover_structured_json_response(value)
         if payload is None:
             return ""
-    if payload.get("type") not in {"request_permission", "patch", "file_replacement"}:
+    if not _is_valid_protocol_payload(payload):
         return ""
     return json.dumps(payload, ensure_ascii=False)
 
@@ -193,6 +320,23 @@ def _extract_diff(value: str) -> str:
     if start is None:
         return ""
     return "\n".join(lines[start:]).rstrip() + "\n"
+
+
+def _is_valid_protocol_payload(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    response_type = payload.get("type")
+    if response_type == "patch":
+        patch = payload.get("patch")
+        return isinstance(patch, str) and bool(patch.strip())
+    if response_type == "file_replacement":
+        path = payload.get("path")
+        content = payload.get("content")
+        return isinstance(path, str) and bool(path.strip()) and isinstance(content, str)
+    if response_type == "request_permission":
+        path = payload.get("path")
+        return isinstance(path, str) and bool(path.strip())
+    return False
 
 
 def _extract_fenced_block(value: str) -> str:
