@@ -6,11 +6,43 @@ import tempfile
 import textwrap
 import unittest
 
+from apos.coder import build_coder_prompt
 from apos.kernel import Kernel, RunOptions, _existing_permission_decision
 from apos.models import ContextRequest, TaskSpec
 
 
 class KernelTests(unittest.TestCase):
+    def test_coder_prompt_defines_allowed_file_path_authority_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "src" / "apos"
+            source.mkdir(parents=True)
+            (source / "mcp_server.py").write_text("from apos.mcp_server import build_server\n", encoding="utf-8")
+            spec = TaskSpec.from_mapping(
+                {
+                    "task_id": "TASK-PATH-CONTRACT",
+                    "goal": "Expose MCP tool names from apos.mcp_server.",
+                    "allowed_files": ["src/apos/mcp_server.py"],
+                    "test_commands": [
+                        "python -c \"from apos.mcp_server import MCP_TOOL_NAMES\"",
+                    ],
+                }
+            )
+
+            prompt = json.loads(build_coder_prompt(root, spec, attempt=1))
+            instructions = "\n".join(prompt["instructions"])
+
+        self.assertIn("PATH AND WRITE AUTHORITY CONTRACT", instructions)
+        self.assertIn("already approved for modification", instructions)
+        self.assertIn("do not request write permission for a file listed in allowed_files", instructions)
+        self.assertIn("repository-relative filesystem paths", instructions)
+        self.assertIn("Use allowed file paths exactly as listed", instructions)
+        self.assertIn("Python module names, import paths, and traceback module names are not repository filesystem paths", instructions)
+        self.assertIn("Never convert a Python module/import name into a filesystem path", instructions)
+        self.assertIn("Request permission only for a genuinely required repository-relative filesystem path outside allowed_files", instructions)
+        self.assertIn("src/apos/mcp_server.py", prompt["task"]["allowed_files"])
+        self.assertIn("src/apos/mcp_server.py", prompt["files"])
+
     def test_treats_existing_write_permission_request_as_granted(self):
         spec = TaskSpec.from_mapping(
             {
